@@ -457,3 +457,26 @@ textarea { resize: vertical; }
 td.clip { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row-warn td:first-child { color: var(--critical); }
 .row-warn td:first-child::after { content: " · no leads"; font-size: 11px; color: var(--muted); }
+
+/* ---------- connections ---------- */
+.steps { list-style: none; counter-reset: step; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin-bottom: 16px; }
+.steps li { counter-increment: step; display: grid; gap: 4px; font-size: 12.5px; color: var(--text-2); }
+.steps li::before { content: counter(step); width: 24px; height: 24px; border-radius: 50%; background: var(--accent); color: #fff; display: grid; place-items: center; font-weight: 700; font-size: 12px; }
+.steps li b { color: var(--text); font-size: 13px; }
+.conn-grid { align-items: start; }
+.conn { display: grid; gap: 12px; }
+.conn .panel-head { margin-bottom: 0; }
+.conn-fields { display: grid; gap: 10px; }
+.conn-fields label { display: grid; gap: 5px; font-size: 12px; font-weight: 600; color: var(--text-2); }
+.conn-fields input[type=text], .conn-fields input[type=password] { font: inherit; font-size: 14px; padding: 9px 11px; border-radius: 8px; border: 1px solid var(--axis); background: var(--surface); color: var(--text); width: 100%; min-width: 0; }
+.conn-fields input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.conn-fields .hint { margin-top: 0; font-weight: 400; }
+.toggle-row { display: flex !important; justify-content: space-between; align-items: center; gap: 12px; font-size: 13px !important; }
+.google-connect { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
+.test-line { font-size: 13px; padding: 8px 10px; border-radius: 8px; background: var(--surface-2); }
+.test-line.ok { color: var(--good-ink); }
+.test-line.bad { color: var(--critical); }
+.conn .form-actions .btn { padding: 8px 14px; font-size: 13px; }
+@media (max-width: 900px) { .steps { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.conn-fields input[type=text], .conn-fields input[type=password] { font-weight: 400; }
+.conn-fields input::placeholder { color: var(--muted); font-weight: 400; opacity: 0.8; }

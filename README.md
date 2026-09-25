@@ -19,6 +19,36 @@ Shops without Housecall Pro get a built-in **Job Board** page instead
 When a service isn't connected, its page says so and shows "—" instead of
 numbers.
 
+## Free setup (recommended)
+
+Costs nothing. It runs on one Windows PC that stays on (the office PC or
+yours), and the client gets a permanent https link that works on any phone
+or computer.
+
+1. **Download** this repository (green **Code** button → Download ZIP) and unzip
+   it somewhere permanent, e.g. `C:\Dashboard`.
+2. **Double-click `install-windows.bat`.** It installs Node.js if needed, makes
+   the dashboard start by itself whenever the PC signs in, stops the PC from
+   sleeping while plugged in, and opens the dashboard.
+3. **Create the owner account** in the browser that opens (`http://localhost:8080`).
+4. **Open Connections** in the menu. Paste the Google OAuth client ID and
+   secret, click **Connect Google**, then fill in the Analytics, Ads, Search
+   Console and Business Profile fields (Business Profile has a **Find my IDs**
+   button). Every section has a **Test** button that shows what came back.
+   Connect Google from this PC; the other fields can be filled from anywhere.
+5. **Double-click `public-link.bat`.** It installs Tailscale (free, no credit
+   card), asks you to sign in once, and turns on Funnel. It prints a link
+   like `https://office-pc.tail1234.ts.net`. That link is permanent: send it
+   to the client.
+
+The client opens the link, signs in (or creates an account you approve on
+Team & Settings), and that's all. The PC has to stay on and signed in to
+Windows; if it restarts, the dashboard and the link come back by themselves
+after sign-in. `stop-dashboard.bat` stops it. Logs are in `data\server.log`.
+
+For a quick temporary link instead, `share-link.bat` uses Cloudflare's free
+tunnel, but that address changes every time it restarts.
+
 ## Accounts and sign-in
 
 - Everyone signs in with **email and password**. Sessions last 30 days per device.
@@ -114,8 +144,9 @@ days are preliminary.
 
 ## Setup, one service at a time
 
-Fill in `.env`. You can start with Housecall Pro and Twilio and add the
-rest later. After each step, run `npm run check` in the folder (it tests the
+Everything below can be entered on the dashboard's **Connections** page
+instead of `.env` (values saved there win). You can start with Google and
+add the rest later. After each step, run `npm run check` in the folder (it tests the
 connection and sends nothing).
 
 ### Basics
@@ -235,7 +266,11 @@ now and then. Don't share it: it holds the account and session records.
 ## Files
 
 ```
-start-dashboard.bat / .sh      start on the PC
+install-windows.bat            one-click install + start with Windows
+public-link.bat                permanent free https link (Tailscale Funnel)
+stop-dashboard.bat             stop the background dashboard
+run-hidden.vbs                 runs the dashboard in the background, restarts it if it stops
+start-dashboard.bat / .sh      start in a window instead (Mac/Linux: .sh)
 share-link.bat / .sh           secure link for phones and laptops
 login.html                     sign-in and create-account page
 index.html, css/, js/          the dashboard (opening index.html directly shows a demo)
@@ -246,6 +281,8 @@ server/jobs.js                 built-in job board (when Housecall Pro isn't used
 server/collector.js            polls each service (every 1, 5 and 30 minutes)
 server/aggregate.js            turns raw data into what the dashboard shows
 server/automations.js          the automation rules
+server/settings.js, checks.js  Connections page: saved settings, Connect Google, Test buttons
+js/connections.js              Connections page
 server/connectors/*.js         Housecall Pro, Twilio, Ooma, Google, Meta, Samsara, geocoding
 server/scripts/gbp-ids.js      npm run gbp-ids
 .env.example                   every setting, with comments

@@ -22,9 +22,12 @@
     { id: "ai", label: "AI Operations Intelligence", sub: "Recommendations", crumb: "AI operations", icon: "spark" },
     { id: "jobs", label: "Job Board", sub: "Book & dispatch", crumb: "Job board", icon: "calendar", live: true },
     { id: "team", label: "Team & Settings", sub: "Accounts, techs, imports", crumb: "Team & settings", icon: "users", live: true },
-  ].filter((v) => (!v.live || cfg.dataSource === "api") && !(v.id === "jobs" && cfg.jobSource !== "board") && !(cfg.hiddenPages || []).includes(v.id));
+    { id: "connections", label: "Connections", sub: "Google, Twilio, keys", crumb: "Connections", icon: "link", live: true, owner: true },
+  ].filter((v) => (!v.live || cfg.dataSource === "api") && !(v.owner && cfg.user && cfg.user.role !== "owner") && !(v.id === "jobs" && cfg.jobSource !== "board") && !(cfg.hiddenPages || []).includes(v.id));
   // Pages drawn by board.js; they manage their own data and refresh.
-  const BOARD_VIEWS = new Set(["jobs", "team"]);
+  const BOARD_VIEWS = new Set(["jobs", "team", "connections"]);
+  // "#connections?google=connected" → "connections"
+  const hashView = () => location.hash.slice(1).split("?")[0];
   const me = cfg.user || null;
   const isOwner = !me || me.role === "owner";
 
@@ -56,7 +59,7 @@
   const icon = (name, cls = "") => `<svg class="ico ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ""}</svg>`;
 
   const ui = {
-    view: VIEWS.some((v) => v.id === location.hash.slice(1)) ? location.hash.slice(1) : VIEWS[0].id,
+    view: VIEWS.some((v) => v.id === hashView()) ? hashView() : VIEWS[0].id,
     range: "7d",
     paused: false,
     seenLog: S.log.length ? S.log[0].t : 0,
@@ -511,6 +514,11 @@
 
   function render() {
     const root = $("#view");
+    if (ui.view === "connections") {
+      window.HVAC_CONNECTIONS.render(root, boardCtx());
+      renderChrome();
+      return;
+    }
     if (BOARD_VIEWS.has(ui.view)) {
       window.HVAC_BOARD.render(ui.view, root, boardCtx());
       renderChrome();
@@ -529,7 +537,7 @@
 
   // ---------- events ----------
   window.addEventListener("hashchange", () => {
-    const id = location.hash.slice(1);
+    const id = hashView();
     if (!VIEWS.some((v) => v.id === id)) return;
     ui.view = id;
     renderNav(); render();

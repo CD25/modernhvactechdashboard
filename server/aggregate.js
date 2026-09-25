@@ -9,7 +9,7 @@ const store = require("./store");
 const { raw, CONNECTORS, jobSource } = require("./collector");
 const { REASONS, classify, isEmergency } = require("./classify");
 const { localDate, lastDates, daysAgo } = require("./time");
-const { RULES } = require("./automations");
+const { rules: ruleList } = require("./automations");
 const { km } = require("./geo");
 
 function emptyDay(date) {
@@ -210,7 +210,7 @@ function build() {
   // ---------- rules & log ----------
   const log = store.state.log;
   const runsToday = (id) => log.filter((l) => l.rule === id && l.t >= todayStart && !l.failed).length;
-  const rules = RULES.map((r) => ({
+  const rules = ruleList().map((r) => ({
     id: r.id, name: r.name, trigger: r.trigger, action: r.action, category: r.category,
     enabled: store.state.rules[r.id] !== undefined ? store.state.rules[r.id] : true,
     available: r.needs().every(Boolean),

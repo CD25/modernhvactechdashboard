@@ -38,4 +38,7 @@ async function authHeaders(extra = {}) {
   return { Authorization: `Bearer ${await accessToken()}`, ...extra };
 }
 
-module.exports = { SCOPES, hasOAuth, accessToken, authHeaders };
+// Forget the cached access token (after a new Google sign-in).
+const resetToken = () => { cached = { token: null, expires: 0 }; };
+
+module.exports = { SCOPES, hasOAuth, accessToken, authHeaders, resetToken };

@@ -18,10 +18,12 @@ const meta = require("./connectors/meta");
 const { daysAgo } = require("./time");
 const { km } = require("./geo");
 
-const B = config.business;
+// Read fresh each time: settings can change from the Connections page.
+const B = new Proxy({}, { get: (_, k) => config.business[k] });
 const firstName = (name) => String(name || "").split(" ")[0] || "there";
 
-const RULES = [
+// Rebuilt on each call because the dispatch rule depends on what's connected.
+const rules = () => [
   { id: "textBack", name: "Missed-call text back", category: "Calls", trigger: "Call goes unanswered during business hours", action: "Text the caller a booking link within a minute", needs: () => [twilio.canText()], needsText: "Twilio with a sending number" },
   { id: "afterHours", name: "After-hours callback", category: "Calls", trigger: "Call missed after hours", action: "Text the caller, queue a morning callback", needs: () => [twilio.canText()], needsText: "Twilio with a sending number" },
   hcp.enabled()
@@ -34,7 +36,7 @@ const RULES = [
 ];
 
 const enabled = (id) => {
-  const r = RULES.find((x) => x.id === id);
+  const r = rules().find((x) => x.id === id);
   const on = store.state.rules[id] !== undefined ? store.state.rules[id] : true;
   return on && r.needs().every(Boolean);
 };
@@ -222,4 +224,4 @@ async function resumeCampaign(id, snapshot) {
   });
 }
 
-module.exports = { RULES, runAll, resumeCampaign };
+module.exports = { rules, runAll, resumeCampaign };

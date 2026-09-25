@@ -7,12 +7,7 @@ if errorlevel 1 (
   pause
   exit /b 1
 )
-if not exist ".env" (
-  copy ".env.example" ".env" >nul
-  echo Created .env - fill in your settings, save, then run this again.
-  notepad ".env"
-  exit /b 0
-)
+if not exist ".env" copy ".env.example" ".env" >nul
 start "" http://localhost:8080
 node server\index.js
 pause

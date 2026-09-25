@@ -20,6 +20,8 @@ const ooma = require("./connectors/ooma");
 const collector = require("./collector");
 const { build } = require("./aggregate");
 const automations = require("./automations");
+const settings = require("./settings");
+const checks = require("./checks");
 
 const ROOT = path.join(__dirname, "..");
 const PUBLIC = new Map([
@@ -36,6 +38,7 @@ const PRIVATE = new Map([
   ["/js/app.js", "js/app.js"],
   ["/js/board.js", "js/board.js"],
   ["/js/marketing.js", "js/marketing.js"],
+  ["/js/connections.js", "js/connections.js"],
 ]);
 const TYPES = {
   ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8",
@@ -66,6 +69,21 @@ function every(ms, fn) {
       running = false;
     }
   }, ms);
+}
+
+// Pull everything again right away (after settings change on the Connections page).
+let resyncing = null;
+function resync() {
+  if (resyncing) return resyncing;
+  resyncing = (async () => {
+    try {
+      await Promise.all([collector.slow(), collector.medium(), collector.fast()]);
+      refresh();
+      await automations.runAll(snapshot);
+      refresh();
+    } catch (e) { console.error(e); } finally { resyncing = null; }
+  })();
+  return resyncing;
 }
 
 async function start() {
@@ -130,10 +148,23 @@ async function readJson(req) {
 function sameOrigin(req) {
   const origin = req.headers.origin;
   if (!origin) return true;
-  try { return new URL(origin).host === req.headers.host; } catch (e) { return false; }
+  let host;
+  try { host = new URL(origin).host; } catch (e) { return false; }
+  // Tunnels may pass the public name as X-Forwarded-Host or rewrite Host to localhost.
+  // Session cookies are SameSite=Lax and the API only takes JSON, so this is a second line of defense.
+  const forwarded = String(req.headers["x-forwarded-host"] || "").split(",")[0].trim();
+  return host === req.headers.host || (forwarded && host === forwarded) || /^(localhost|127\.0\.0\.1)(:\d+)?$/.test(String(req.headers.host || ""));
 }
 
+// Google's "Desktop app" clients accept loopback redirects, so Connect Google runs on the host PC.
+const googleRedirect = () => `http://127.0.0.1:${config.port}/api/google/callback`;
+const googleReturn = new Map(); // state -> where to send the owner afterwards
+
+// A request from this PC's own browser. Tunnels (Cloudflare, Tailscale Funnel) also
+// connect from 127.0.0.1, so the Host header must be localhost too and no proxy headers present.
 const isLocal = (req) => !req.headers["cf-connecting-ip"] && !req.headers["x-forwarded-for"] &&
+  !req.headers["tailscale-funnel-request"] &&
+  /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(String(req.headers.host || "")) &&
   ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(req.socket.remoteAddress);
 const clientIp = (req) => String(req.headers["cf-connecting-ip"] || req.headers["x-forwarded-for"] || req.socket.remoteAddress || "").split(",")[0].trim();
 
@@ -193,6 +224,22 @@ async function route(req, res, url) {
     return send(res, 200, { ok: true }, "application/json", { "Set-Cookie": auth.clearCookie(req) });
   }
 
+  // Google sends the owner back here after "Connect Google". The one-time
+  // state value (issued to the signed-in owner) is the check.
+  if (p === "/api/google/callback" && method === "GET") {
+    const back = googleReturn.get(url.searchParams.get("state")) || "/";
+    googleReturn.delete(url.searchParams.get("state"));
+    try {
+      if (url.searchParams.get("error")) throw auth.userError("Google sign-in was cancelled.");
+      await settings.finishGoogle(url.searchParams.get("code"), url.searchParams.get("state"), googleRedirect());
+      store.log("system", "Google account connected");
+      resync();
+      return redirect(res, back + "#connections?google=connected");
+    } catch (e) {
+      return redirect(res, back + "#connections?google=" + encodeURIComponent(e.expose ? e.message : "failed"));
+    }
+  }
+
   // Everything below needs a signed-in, approved account.
   const user = auth.currentUser(req);
   if (!user) {
@@ -219,7 +266,7 @@ async function route(req, res, url) {
   if (method === "PATCH" && p.startsWith("/api/automations/")) {
     ownerOnly();
     const id = decodeURIComponent(p.split("/").pop());
-    if (!automations.RULES.some((r) => r.id === id)) return send(res, 404, { error: "Unknown rule" });
+    if (!automations.rules().some((r) => r.id === id)) return send(res, 404, { error: "Unknown rule" });
     const { enabled } = await readJson(req);
     store.state.rules[id] = Boolean(enabled);
     store.log(id, `${user.name} turned this rule ${enabled ? "on" : "off"}`);
@@ -232,6 +279,45 @@ async function route(req, res, url) {
     await collector.medium();
     refresh();
     return send(res, 200, { ok: true });
+  }
+
+  // ----- connections (owner) -----
+  if (p === "/api/settings" && method === "GET") {
+    ownerOnly();
+    return send(res, 200, {
+      groups: settings.view(),
+      googleConnected: settings.hasGoogleToken(),
+      canConnectGoogle: isLocal(req),
+      localUrl: `http://localhost:${config.port}`,
+      live: config.automationsLive,
+    });
+  }
+  if (p === "/api/settings" && method === "POST") {
+    ownerOnly();
+    settings.save((await readJson(req)).values);
+    store.log("system", `${user.name} updated connection settings`);
+    refresh();
+    resync();
+    return send(res, 200, { ok: true });
+  }
+  if (/^\/api\/settings\/test\/[a-zA-Z0-9]+$/.test(p) && method === "POST") {
+    ownerOnly();
+    return send(res, 200, await checks.test(p.split("/").pop()));
+  }
+  if (p === "/api/settings/gbp-ids" && method === "GET") {
+    ownerOnly();
+    try {
+      return send(res, 200, { locations: await settings.findGbpIds() });
+    } catch (e) {
+      throw auth.userError(/(403|429)/.test(e.message) ? "Google hasn't approved Business Profile API access for this project yet (or the two My Business APIs aren't enabled)." : e.message.slice(0, 300), 400);
+    }
+  }
+  if (p === "/api/google/connect" && method === "GET") {
+    ownerOnly();
+    if (!isLocal(req)) throw auth.userError(`Connect Google from the PC that runs the dashboard: open http://localhost:${config.port} there.`, 400);
+    const authUrl = settings.googleAuthUrl(googleRedirect());
+    googleReturn.set(new URL(authUrl).searchParams.get("state"), `http://${req.headers.host}/`);
+    return send(res, 200, { url: authUrl });
   }
 
   // ----- job board -----

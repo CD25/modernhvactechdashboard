@@ -20,7 +20,6 @@ function loadEnvFile() {
 }
 loadEnvFile();
 
-const env = process.env;
 const list = (v) => (v ? v.split(",").map((s) => s.trim()).filter(Boolean) : []);
 const numOr = (v, d) => (v !== undefined && v !== "" && !isNaN(Number(v)) ? Number(v) : d);
 
@@ -38,7 +37,16 @@ function parseJson(v, fallback) {
   try { return JSON.parse(v); } catch (e) { console.warn("Ignoring invalid JSON setting:", v); return fallback; }
 }
 
-module.exports = {
+// Settings saved from the dashboard's Connections page (data/settings.json)
+// override .env, so nothing has to be edited by hand.
+const fs2 = require("fs");
+const settingsFile = () => path.join(process.env.DATA_DIR || path.join(__dirname, "..", "data"), "settings.json");
+function savedSettings() {
+  try { return JSON.parse(fs2.readFileSync(settingsFile(), "utf8")); } catch (e) { return {}; }
+}
+
+function build(env) {
+  return {
   port: numOr(env.PORT, 8080),
   // 0.0.0.0 lets phones and laptops on the same network open it too.
   host: env.HOST || "0.0.0.0",
@@ -136,3 +144,19 @@ module.exports = {
     vehicleTechs: parseJson(env.SAMSARA_VEHICLE_TECHS, {}),
   },
 };
+}
+
+const config = {};
+function reload() {
+  const env = { ...process.env, ...savedSettings() };
+  if (env.TZ) process.env.TZ = env.TZ;
+  for (const k of Object.keys(config)) if (k !== "reload" && k !== "settingsFile") delete config[k];
+  Object.assign(config, build(env));
+}
+config.reload = reload;
+config.settingsFile = settingsFile;
+reload();
+Object.defineProperty(config, "reload", { enumerable: false });
+Object.defineProperty(config, "settingsFile", { enumerable: false });
+
+module.exports = config;
