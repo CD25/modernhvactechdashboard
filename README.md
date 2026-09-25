@@ -1,107 +1,163 @@
-# HVAC Service Operations Dashboard
+# Modern HVAC Tech Dashboard
 
-An automated operations cockpit for a modern HVAC and plumbing shop. It is
-plain HTML, CSS and JavaScript with no build step and no dependencies.
+A live operations dashboard for an HVAC and plumbing shop. It pulls real
+data from the shop's tools, runs the routine follow-ups by itself, and shows
+everything on five pages.
 
-Open `index.html` in a browser, or serve the folder:
+| Page | Real data from | What runs by itself |
+|---|---|---|
+| **Call & Booking Analytics** | Twilio calls, Housecall Pro jobs | Missed-call text back, after-hours callback texts |
+| **Local SEO & Web Traffic** | Google Analytics 4, Search Console, Business Profile | Review request after every completed job |
+| **Local Campaigns & LSAs** | Google Ads (including Local Services Ads), Meta Ads | Pause campaigns above your cost-per-lead target; raise a search budget when 3+ techs are free |
+| **Dispatch, Field Techs & GPS** | Housecall Pro jobs and techs, optional Samsara GPS | Text the dispatcher the closest free tech for each unassigned job |
+| **AI Operations Intelligence** | All of the above | On/off switch for every rule, and a log of everything they did |
+
+When a service isn't connected, its page says "Not connected" and shows
+"—" instead of numbers. A strip at the top of each page shows which sources
+are synced and when.
+
+## Two ways to run it
+
+**Demo (no setup).** Open `index.html` in a browser. It runs on simulated
+data so you can click through every page.
+
+**Live (real data).** Run the server. It serves the same dashboard, switched
+to live data.
 
 ```bash
-cd hvac-dashboard
-python3 -m http.server 8080   # then visit http://localhost:8080
+cp .env.example .env      # then fill it in (steps below)
+npm run check             # tests each connection, sends nothing
+npm start                 # http://localhost:8080
 ```
 
-## Sections
+It needs Node.js 18.17 or newer and has no other dependencies.
 
-| Section | What it shows | What runs on its own |
-|---|---|---|
-| **Call & Booking Analytics** | Inbound and outbound calls, bookings, conversion, call-to-dispatch time, demand mix, top call reasons, desk service levels, opportunity queue | Missed-call text back, after-hours callback queue |
-| **Local SEO & Web Traffic** | Organic visitors, quote requests, map-pack keywords, backlinks, keyword rank movement, Google reviews, traffic by source | Review requests after every completed job |
-| **Local Campaigns & LSAs** | Spend, leads, cost per lead, ROAS, per-campaign budget pacing | Budget guard pauses campaigns above the CPL target; idle-capacity boost raises LSA budget when 3+ techs are free |
-| **Dispatch, Field Techs & GPS** | Live fleet map, job board with ETAs, tech roster with revenue and on-time rate | Auto-dispatch assigns the nearest qualified tech |
-| **AI Operations Intelligence** | Call forecast, staffing need, demand shifts, ranking drops, CPL alerts, top performer | On/off switch for every automation rule, plus a live activity log |
+## Setup, one service at a time
 
-The whole dashboard refreshes every `refreshMs` (4s by default). The bell in
-the top bar opens a drawer that lists every action the automations took.
-Rule switches and the selected time range are saved in the browser.
+Fill in `.env` as you go. You can start with only Housecall Pro and Twilio
+and add the rest later. After each step, run `npm run check`.
 
-## Configuration
+### 1. Basics
 
-Edit `js/config.js`:
+- `TZ`: the shop's time zone, e.g. `America/Chicago`. Daily totals and "today" use it.
+- `DASHBOARD_PASSWORD`: always set this before putting the server online.
+  The browser will ask for `DASHBOARD_USER` and this password.
+- `BUSINESS_NAME`, `MANAGER_NAME`, `OPEN_HOUR`/`CLOSE_HOUR`, `BOOKING_URL`.
+- `REVIEW_URL`: the shop's Google review link (Business Profile → Ask for reviews).
+- `MANAGER_PHONE`: the dispatcher's mobile, for nearest-tech suggestions.
+- `SERVICE_ZONES`: named areas for the map, e.g.
+  `Downtown:30.267,-97.743;North:30.40,-97.72`. The first one is the shop.
 
-- `company` sets the name, tagline, region and manager shown in the chrome.
-- `dataSource` is `"simulated"` (the default, a built-in live engine for
-  demos) or `"api"`.
-- `refreshMs` sets the polling interval.
-- `simulationSpeed` sets how busy the demo is: 1 is real-world call volume.
-- `targets` sets the answer-rate, same-day booking, max cost-per-lead and
-  dispatch-time goals. Meters, alerts and the budget guard all read these.
+### 2. Housecall Pro: jobs, techs, estimates, revenue
 
-## Connecting real data
+1. The shop needs the MAX plan. In Housecall Pro go to **App Store → API** and generate a key.
+2. Put it in `HOUSECALL_API_KEY`.
 
-Set `dataSource: "api"` and point `api.baseUrl` at your back end. On every
-refresh the dashboard calls:
+Techs appear once they have been assigned a job in the last 30 days, so
+office staff stay off the board. Each job is sorted into a call reason by the
+words in its description and line items. Adjust the patterns in
+`server/classify.js` to match how the office writes jobs up.
 
-- `GET {baseUrl}/api/dashboard/snapshot` and renders the JSON it returns.
-- `PATCH {baseUrl}/api/automations/{ruleId}` with body `{ "enabled": true|false }`
-  when someone flips a rule switch.
+### 3. Twilio: calls and text messages
 
-The snapshot uses the same shape as the simulated state in `js/engine.js`:
+1. From the Twilio console, copy the Account SID and Auth Token into
+   `TWILIO_ACCOUNT_SID` and `TWILIO_AUTH_TOKEN`.
+2. Set `TWILIO_FROM_NUMBER` to the number texts should come from.
+3. Set `TWILIO_TRACKED_NUMBERS` to the shop's business line(s), so personal
+   or test numbers don't count.
+4. **Before turning automations on:** US numbers must be registered for
+   A2P 10DLC in the Twilio console (Messaging → Regulatory compliance), or
+   carriers will block the texts.
 
-```jsonc
-{
-  "days": [ // oldest → today, at least 14 entries (30 for the 30-day view)
-    { "date": "2026-09-25", "calls": 84, "answered30": 72, "missed": 3, "booked": 61,
-      "outbound": 33, "callbacks": 6, "dispatched": 52, "dispatchSecs": 27040,
-      "completed": 55, "revenue": 23800, "quotes": 16, "lsaLeads": 18, "lsaSpend": 820, "lsaBooked": 12,
-      "reasons": { "cooling": 31, "waterHeater": 17, "sewer": 10, "furnace": 8, "iaq": 6, "maintenance": 12 },
-      "demand":  { "emergency": 58, "maintenance": 12, "estimate": 14 },
-      "web":     { "organic": 210, "maps": 98, "paid": 57, "direct": 41 } }
-  ],
-  "hourly": [ { "hour": 0, "calls": 0, "booked": 0 } /* … 24 entries */ ],
-  "techs": [ { "id": "T1", "name": "Marcus Hill", "initials": "MH", "title": "Sr. HVAC", "trade": "HVAC",
-               "truck": "Truck 12", "x": 40.2, "y": 22.5, "status": "available|enroute|onsite|break",
-               "jobId": null, "jobsToday": 3, "revenueToday": 2100, "onTime": 0.95 } ],
-  "jobs": [ { "id": "J10231", "customer": "Ava Patel", "address": "412 Maple Ave", "zone": "Oakview",
-              "x": 30, "y": 18, "reasonLabel": "No cool / AC failure", "priority": "emergency|standard",
-              "status": "unassigned|enroute|onsite|done", "techId": "T1", "eta": 14 } ],
-  "keywords":  [ { "term": "HVAC repair near me", "pos": 2, "prev": 3, "volume": 4400 } ],
-  "campaigns": [ { "id": "lsa-hvac", "name": "LSA · HVAC", "channel": "Local Services Ads", "status": "active|paused",
-                   "dailyBudget": 450, "spendToday": 212, "leadsToday": 5, "bookedToday": 3, "cpl": 42.4 } ],
-  "opportunities": { "estimates": 12, "afterHours": 8, "renewals": 22 },
-  "reviews": { "rating": 4.8, "count": 612, "requestsToday": 9 },
-  "backlinks": 417, "newBacklinks": 23,
-  "rules": [ { "id": "textBack", "name": "Missed-call text back", "trigger": "…", "action": "…",
-               "category": "Calls", "enabled": true, "runsToday": 12 } ],
-  "log": [ { "t": 1758812345000, "rule": "autoDispatch", "text": "Assigned Marcus Hill to …" } ]
-}
-```
+A call counts as answered when the forwarded leg connects (or, with no
+forwarding, when it lasts `TWILIO_MIN_ANSWERED_SECONDS`).
 
-Map coordinates (`x`, `y`) are on a 100 × 60 grid over the service area.
-Project GPS latitude and longitude onto that box on the server.
+### 4. Google: Ads & LSA, Analytics, Business Profile, Search Console
 
-Typical sources for each block:
+All four use one Google sign-in.
 
-| Block | Source |
-|---|---|
-| `days[].calls/missed/answered30/outbound`, `hourly` | Call tracking (CallRail, RingCentral, Dialpad) webhooks |
-| `booked`, `jobs`, `completed`, `revenue`, `opportunities` | Field-service software (ServiceTitan, Housecall Pro, Jobber) |
-| `techs[].x/y/status` | Fleet GPS (Samsara, Verizon Connect, Motive) plus job status |
-| `web`, `quotes` | GA4 and website form webhooks |
-| `keywords`, `backlinks`, `reviews` | Search Console, a rank tracker (BrightLocal, Local Falcon), Google Business Profile API |
-| `campaigns`, `lsa*` | Google Ads API (includes Local Services Ads), Meta Marketing API |
+1. In [Google Cloud Console](https://console.cloud.google.com), create a
+   project and enable: **Google Ads API**, **Google Analytics Data API**,
+   **Business Profile Performance API**, **Google My Business API** (for
+   reviews) and **Google Search Console API**. The Business Profile APIs need
+   an access request first:
+   <https://developers.google.com/my-business/content/prereqs>.
+2. Under **APIs & Services → Credentials**, create an OAuth client of type
+   **Desktop app**. Put its id and secret in `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`.
+3. Run `npm run google-auth`, open the link, and sign in with an account that
+   can see the shop's Ads, Analytics, Business Profile and Search Console.
+   Paste the printed `GOOGLE_REFRESH_TOKEN` into `.env`.
+4. Fill in the ids:
+   - **Google Ads**: `GOOGLE_ADS_DEVELOPER_TOKEN` (Ads → Tools → API Center;
+     Basic access is needed to change campaigns), `GOOGLE_ADS_CUSTOMER_ID`,
+     and `GOOGLE_ADS_LOGIN_CUSTOMER_ID` if you sign in through a manager account.
+     Check the current API version at
+     <https://developers.google.com/google-ads/api/docs/release-notes> and
+     set `GOOGLE_ADS_API_VERSION` if it has moved past the default.
+   - **Analytics**: `GA4_PROPERTY_ID` (Admin → Property details), and
+     `GA4_QUOTE_EVENT` = the event your quote form fires (`generate_lead` by default).
+     Tag Business Profile website links with `utm_source=gbp` so those visits show as "Maps".
+   - **Business Profile**: `GBP_ACCOUNT_ID` and `GBP_LOCATION_ID`.
+   - **Search Console**: `GSC_SITE_URL` exactly as the property is named, and
+     the keywords to track in `GSC_KEYWORDS`.
 
-In API mode the automation rules run on your server, next to those
-integrations. The dashboard only shows their results and flips the switches.
+### 5. Meta Ads
+
+In Meta Business Settings create a **system user** with access to the ad
+account, generate a token with `ads_read` and `ads_management`, and set
+`META_ACCESS_TOKEN` and `META_AD_ACCOUNT_ID`.
+
+### 6. Samsara GPS (optional)
+
+Without GPS, each tech is shown at the address of the job they're on and ETAs
+aren't estimated. With Samsara, set `SAMSARA_API_TOKEN`; vehicles are matched
+to techs by name, or by `SAMSARA_VEHICLE_TECHS`.
+
+## Turning the automations on
+
+The server starts with `AUTOMATIONS_LIVE=false`. In that mode every rule
+runs and writes what it *would* do to the activity log ("Dry run: …") but
+sends no texts and changes no campaigns. Watch the log for a day, then set
+`AUTOMATIONS_LIVE=true` and restart.
+
+- Each call, job and estimate is handled once, even across restarts
+  (remembered in `data/state.json`).
+- Any rule can be switched off from the AI Operations page.
+- A campaign the budget guard paused can be resumed from the Campaigns page;
+  the guard then leaves it alone for an hour.
+- Budgets raised by the idle-capacity boost go back to normal the next day.
+- Rules that need a service you haven't connected show what they need and
+  can't be switched on.
+
+## What each number means (live mode)
+
+- **Inbound calls / missed**: Twilio inbound calls on the tracked numbers.
+- **Outbound follow-up / callbacks**: outbound calls; a callback is one to
+  a number that missed a call in the previous 48 hours.
+- **Appointments booked**: Housecall Pro jobs created that day. Conversion = booked ÷ inbound calls.
+- **Call → dispatch**: time from a job being created to "On my way", for jobs dispatched the same day.
+- **Same-day dispatched**: share of jobs booked that got a tech on the way the same day.
+- **Revenue / avg ticket**: totals of jobs completed that day.
+- **Keyword rank**: average Google position from Search Console (lags about two days).
+- **Cost per lead**: today's spend ÷ conversions (Google Ads) or lead actions (Meta).
+
+## Hosting
+
+Any host that runs Node works: a small VPS, Render, Railway, Fly.io, or a
+PC in the office. Keep one instance running. Set the variables from `.env` in
+the host's settings, and keep `data/` on persistent storage so the server
+remembers who has already been texted.
 
 ## Files
 
 ```
-hvac-dashboard/
-├── index.html        app shell: sidebar, top bar, activity drawer
-├── css/styles.css    theme tokens (light and dark), layout, components
-└── js/
-    ├── config.js     company, data source, refresh rate, targets
-    ├── engine.js     live state, simulation, automation rules, API polling
-    ├── charts.js     SVG line and stacked-bar charts with hover tooltips
-    └── app.js        views, insights, routing, refresh loop
+index.html, css/, js/           the dashboard (works alone as the demo)
+server/index.js                 web server, polling schedule, API for the dashboard
+server/collector.js             polls each service (every 1, 5 and 30 minutes)
+server/aggregate.js             turns raw data into what the dashboard shows
+server/automations.js           the automation rules
+server/connectors/*.js          one file per service
+server/scripts/check.js         npm run check
+server/scripts/google-auth.js   npm run google-auth
+.env.example                    every setting, with comments
 ```
