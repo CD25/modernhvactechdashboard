@@ -148,6 +148,7 @@ function browserConfig(user) {
     company: { name: b.name, tagline: b.tagline, region: b.region, manager: { name: user.name, role: user.role === "owner" ? "Owner" : "Staff" } },
     user: auth.publicUser(user),
     dataSource: "api",
+    jobSource: collector.jobSource(),
     refreshMs: 10000,
     api: { baseUrl: "", snapshotPath: "/api/dashboard/snapshot", rulesPath: "/api/automations", headers: {} },
     targets: config.targets,
@@ -234,6 +235,9 @@ async function route(req, res, url) {
   // ----- job board -----
   if (p === "/api/jobs" && method === "GET") {
     return send(res, 200, { jobs: jobBoard.recent(45), techs: jobBoard.techs() });
+  }
+  if (p.startsWith("/api/jobs") && method !== "GET" && collector.jobSource() === "housecall") {
+    throw auth.userError("Jobs are managed in Housecall Pro.", 409);
   }
   if (p === "/api/jobs" && method === "POST") {
     const job = jobBoard.addJob(await readJson(req), user);

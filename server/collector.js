@@ -7,6 +7,7 @@
 
 const config = require("./config");
 const jobBoard = require("./jobs");
+const hcp = require("./connectors/housecallpro");
 const ooma = require("./connectors/ooma");
 const geocode = require("./connectors/geocode");
 const twilio = require("./connectors/twilio");
@@ -19,7 +20,8 @@ const samsara = require("./connectors/samsara");
 const { daysAgo } = require("./time");
 
 const CONNECTORS = [
-  { id: "jobs", name: "Job board", mod: { enabled: () => true }, feeds: "Jobs, techs, estimates, revenue" },
+  { id: "housecall", name: "Housecall Pro", mod: hcp, feeds: "Jobs, techs, estimates, revenue, on-my-way" },
+  { id: "jobs", name: "Built-in job board", mod: { enabled: () => !hcp.enabled() }, feeds: "Jobs and techs (used when Housecall Pro isn't connected)" },
   { id: "twilio", name: "Twilio", mod: twilio, feeds: "Calls and text messages" },
   { id: "ooma", name: "Ooma call logs", mod: { enabled: () => useOoma() }, feeds: "Calls from Ooma CSV imports" },
   { id: "googleAds", name: "Google Ads & LSA", mod: googleAds, feeds: "Ad spend, leads, LSA" },
@@ -78,12 +80,15 @@ function trim() {
 }
 
 // Job board and Ooma imports live on this machine, so they reload instantly.
+// With Housecall Pro connected, jobs and techs come from there instead.
 function local() {
-  raw.jobs = new Map(jobBoard.normalized().map((j) => [j.id, j]));
-  raw.employees = jobBoard.employees();
-  raw.estimates = jobBoard.estimates();
-  raw.phoneGps = jobBoard.techLocations();
-  raw.status.jobs = { ok: true, error: null, lastSync: Date.now() };
+  if (!hcp.enabled()) {
+    raw.jobs = new Map(jobBoard.normalized().map((j) => [j.id, j]));
+    raw.employees = jobBoard.employees();
+    raw.estimates = jobBoard.estimates();
+    raw.phoneGps = jobBoard.techLocations();
+    raw.status.jobs = { ok: true, error: null, lastSync: Date.now() };
+  }
   if (geocode.enabled()) raw.status.geocode = { ok: true, error: null, lastSync: Date.now() };
   for (const [k, c] of raw.calls) if (c.source === "ooma") raw.calls.delete(k);
   if (useOoma()) {
@@ -94,9 +99,14 @@ function local() {
   if (!useTwilioCalls()) for (const [k, c] of raw.calls) if (c.source !== "ooma") raw.calls.delete(k);
 }
 
-// Every minute: today's calls and truck positions.
+// Every minute: today's calls, Housecall Pro jobs and truck positions.
 async function fast() {
+  const todayStart = daysAgo(0).getTime();
   await Promise.all([
+    run("housecall", async () => {
+      const [recent, today] = await Promise.all([hcp.jobsSince(daysAgo(1).getTime()), hcp.jobsScheduledBetween(todayStart, todayStart + 86400000)]);
+      for (const j of [...recent, ...today]) raw.jobs.set(j.id, j);
+    }),
     useTwilioCalls() && run("twilio", async () => {
       for (const c of await twilio.callsSince(daysAgo(1))) raw.calls.set(c.sid, c);
     }),
@@ -111,6 +121,7 @@ async function medium() {
   await Promise.all([
     run("googleAds", async () => { raw.adsCampaigns = await googleAds.campaignsToday(); }),
     run("meta", async () => { raw.metaCampaigns = await meta.campaignsToday(); }),
+    run("housecall", async () => { raw.estimates = await hcp.estimatesSince(daysAgo(30).getTime()); }),
   ]);
 }
 
@@ -119,6 +130,13 @@ async function slow() {
   await Promise.all([
     useTwilioCalls() && run("twilio", async () => {
       for (const c of await twilio.callsSince(daysAgo(30))) raw.calls.set(c.sid, c);
+    }),
+    run("housecall", async () => {
+      const [jobs, emps] = await Promise.all([hcp.jobsSince(daysAgo(30).getTime()), hcp.employees()]);
+      raw.jobs = new Map(jobs.map((j) => [j.id, j]));
+      // Office staff have no jobs; only people assigned work in the last 30 days are techs.
+      const worked = new Set(jobs.flatMap((j) => j.techIds));
+      raw.employees = emps.filter((e) => worked.has(e.id)).map((e) => ({ ...e, trade: config.housecall.trades[e.id] || e.trade }));
     }),
     run("googleAds", async () => { raw.lsa = await googleAds.lsaHistory(30); }),
     run("ga4", async () => { raw.web = await ga4.daily(30); }),
@@ -131,4 +149,6 @@ async function slow() {
   trim();
 }
 
-module.exports = { raw, CONNECTORS, fast, medium, slow, local };
+const jobSource = () => (hcp.enabled() ? "housecall" : "board");
+
+module.exports = { raw, CONNECTORS, fast, medium, slow, local, jobSource };

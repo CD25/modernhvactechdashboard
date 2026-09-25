@@ -6,13 +6,15 @@ tablet or laptop with a link.
 
 | Page | Data from | What runs by itself |
 |---|---|---|
-| **Call & Booking Analytics** | Twilio calls (or Ooma call-log uploads), job board | Missed-call text back, after-hours callback texts |
+| **Call & Booking Analytics** | Twilio call logs, Housecall Pro jobs | Missed-call text back, after-hours callback texts |
 | **Local SEO & Web Traffic** | Google Analytics 4, Search Console, Business Profile | Review request text when a job is marked done |
 | **Local Campaigns & LSAs** | Google Ads (including Local Services Ads), Meta Ads (later) | Pause campaigns above the cost-per-lead target; raise a search budget when 3+ techs are free |
-| **Dispatch, Field Techs & GPS** | Job board, techs' phones, optional Samsara GPS | Assign the nearest free tech and text them the job |
+| **Dispatch, Field Techs & GPS** | Housecall Pro (jobs, techs, On my way), optional Samsara GPS | Text the dispatcher the closest free tech for unassigned jobs |
 | **AI Operations Intelligence** | All of the above | On/off switch for every rule, log of everything they did |
-| **Job Board** | Entered by the office | Techs tap On the way / Started / Done from their phones |
-| **Team & Settings** | | Approve accounts, manage techs, import Ooma call logs, see connections |
+| **Team & Settings** | | Approve accounts, see techs, see which services are connected |
+
+Shops without Housecall Pro get a built-in **Job Board** page instead
+(leave `HOUSECALL_API_KEY` empty).
 
 When a service isn't connected, its page says so and shows "—" instead of
 numbers.
@@ -66,7 +68,7 @@ On a Mac, use `start-dashboard.sh` and `share-link.sh` instead.
 
 ## Setup, one service at a time
 
-Fill in `.env`. You can start with only Twilio and the job board and add the
+Fill in `.env`. You can start with Housecall Pro and Twilio and add the
 rest later. After each step, run `npm run check` in the folder (it tests the
 connection and sends nothing).
 
@@ -78,53 +80,58 @@ connection and sends nothing).
 - `SERVICE_ZONES`: named areas for the map, e.g.
   `Downtown:30.267,-97.743;North:30.40,-97.72`. The first one is the shop.
 
-### Job board and techs
+### Housecall Pro: jobs, techs, estimates, On my way
 
-Nothing to configure. On **Team & Settings**, add each tech with their trade
-and mobile number. On **Job Board**, add jobs and estimates as they come in.
+1. The shop needs the MAX plan. In Housecall Pro go to **App Store → API** and generate a key.
+2. Put it in `HOUSECALL_API_KEY`. Run `npm run check`: it prints one real
+   job so you can confirm the fields come through.
+3. Set `MANAGER_PHONE` to the dispatcher's mobile. When a job has no tech,
+   they get a text naming the closest free one. Assigning stays in Housecall Pro.
 
-- Techs open the link on their phone and tap **On the way**, **Started** and
-  **Done** (with the amount billed). If they allow location, their position
-  shows on the dispatch map.
-- With "Auto-assign nearest tech" on, a job with no tech gets the closest
-  free tech of the right trade, and the tech gets a text with the job.
-- To show job addresses on the map, enable the **Geocoding API** in the
-  Google Cloud project, create an API key restricted to it, and set
-  `GOOGLE_MAPS_API_KEY`.
+Techs appear once they've been assigned a job in the last 30 days, so office
+staff stay off the board. On the way / Started / Done come from the techs'
+Housecall Pro app. Each job is sorted into a call reason by the words in its
+description and line items. Adjust the patterns in `server/classify.js` to
+match how the office writes jobs up. To place jobs on the map, Housecall Pro
+addresses need coordinates; if they don't have them, set `GOOGLE_MAPS_API_KEY`
+(Geocoding API) and they're looked up.
 
-### Calls: Twilio and Ooma
+### Calls: Twilio (with Ooma)
 
-**Twilio** (inbound calls now, outbound later):
+The business number lives in Twilio, and Ooma answers it. Every call to
+that number passes through Twilio first, so the dashboard counts calls from
+Twilio's call log. Keep `CALL_SOURCE=twilio` (or `auto`), not `both`, or
+calls would be counted twice.
 
 1. Copy the Account SID and Auth Token from the Twilio console into
    `TWILIO_ACCOUNT_SID` and `TWILIO_AUTH_TOKEN`.
-2. Set `TWILIO_TRACKED_NUMBERS` to the business number(s) and
-   `TWILIO_FROM_NUMBER` to the number texts go out from.
-3. **Before turning automations on:** register the number for A2P 10DLC in
-   Twilio (Messaging → Regulatory compliance) or carriers will block texts.
+2. Set `TWILIO_TRACKED_NUMBERS` and `TWILIO_FROM_NUMBER` to the business number.
+3. Run `npm run check` and compare yesterday's missed calls with Ooma's call
+   log. If Ooma answers every call (auto-attendant or voicemail), Twilio sees
+   those as answered, so the missed count would read low. In that case,
+   export Ooma's call log as CSV, upload it on **Team & Settings**, and set
+   `CALL_SOURCE=ooma`.
+4. **Texts:** the automations send from the same number through Twilio, so
+   customers see the usual business number. Messages sent this way may not
+   appear in the Ooma messaging app, and whether customer replies reach Ooma
+   depends on how the number's messaging is routed today. Send one test text
+   before turning automations on. The number must be registered for A2P 10DLC
+   (Twilio → Messaging → Regulatory compliance) or carriers block the texts.
 
 Until outbound calls go through Twilio, the Outbound tile reads
 "Outbound calls aren't set up yet".
-
-**Ooma.** Ooma doesn't offer a public API for call logs, so calls that only
-go through Ooma are brought in by upload: in Ooma Office Manager open **Call
-Logs**, export to CSV, and upload the file on **Team & Settings**.
-Re-uploading overlapping files is safe. Set `CALL_SOURCE`:
-
-- `auto` (default): count Twilio calls if Twilio is set up, otherwise Ooma uploads.
-- `ooma`: count only Ooma uploads.
-- `both`: count both. Use this only if the same call never passes through
-  both (for example, if the Twilio number forwards to Ooma, `both` would count it twice).
-
-Texts to customers are sent through Twilio. Replies land on the Twilio
-number, not in the Ooma app.
 
 ### Google: Ads & LSA, Analytics, Business Profile, Search Console
 
 1. In the Google Cloud project, make sure these are enabled: **Google Ads API**,
    **Google Analytics Data API**, **Business Profile Performance API**,
-   **Google My Business API** (reviews), **Google Search Console API**, and
-   **Geocoding API** (for the map).
+   **Google My Business API** (reviews), **My Business Account Management API**
+   and **My Business Business Information API** (to look up your ids),
+   **Google Search Console API**, and **Geocoding API** (for the map). The
+   Business Profile APIs only work after Google approves access for the
+   project: <https://developers.google.com/my-business/content/prereqs>. If
+   `npm run check` shows a 403 or a quota of 0 for Business Profile, that
+   approval is still pending.
 2. **APIs & Services → Credentials → Create OAuth client → Desktop app**.
    Put the id and secret in `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`.
 3. Run `npm run google-auth`, open the link, and sign in with the Google
@@ -139,7 +146,8 @@ number, not in the Ooma app.
    - **Analytics**: `GA4_PROPERTY_ID` and `GA4_QUOTE_EVENT` (the event your
      quote form fires). Tag Business Profile website links with
      `utm_source=gbp` so those visits show as "Maps".
-   - **Business Profile**: `GBP_ACCOUNT_ID` and `GBP_LOCATION_ID`.
+   - **Business Profile**: run `npm run gbp-ids` to list the account and
+     location ids, and copy them into `GBP_ACCOUNT_ID` and `GBP_LOCATION_ID`.
    - **Search Console**: `GSC_SITE_URL` exactly as the property is named, and
      the keywords to track in `GSC_KEYWORDS`.
 
@@ -165,17 +173,17 @@ texted, assigned or changed. Watch the log for a day, then set
 ## What each number means
 
 - **Inbound calls / missed**: calls to the tracked numbers (Twilio or Ooma).
-- **Appointments booked**: jobs and estimates added to the board that day.
+- **Appointments booked**: jobs created in Housecall Pro that day.
   Conversion = booked ÷ inbound calls.
-- **Call → dispatch**: time from adding a job to the tech tapping On the way, same day.
-- **Revenue / avg ticket**: amounts entered when jobs are marked Done.
+- **Call → dispatch**: time from a job being created to the tech's On my way, same day.
+- **Revenue / avg ticket**: totals of jobs completed that day in Housecall Pro.
 - **Keyword rank**: average Google position from Search Console (lags about two days).
 - **Cost per lead**: today's spend ÷ conversions (Google Ads) or lead actions (Meta).
 
 ## Backups
 
-Everything the dashboard stores is in the `data` folder: accounts, jobs,
-techs, Ooma imports and the automation log. Copy that folder somewhere safe
+Everything the dashboard stores is in the `data` folder: accounts, Ooma
+imports, the automation log, and (without Housecall Pro) the job board. Copy that folder somewhere safe
 now and then. Don't share it: it holds the account and session records.
 
 ## Files
@@ -185,13 +193,14 @@ start-dashboard.bat / .sh      start on the PC
 share-link.bat / .sh           secure link for phones and laptops
 login.html                     sign-in and create-account page
 index.html, css/, js/          the dashboard (opening index.html directly shows a demo)
-js/board.js                    Job Board and Team & Settings pages
+js/board.js                    Team & Settings (and the built-in Job Board)
 server/index.js                web server, sign-in, API
 server/auth.js                 accounts, passwords, sessions
-server/jobs.js                 job board and techs
+server/jobs.js                 built-in job board (when Housecall Pro isn't used)
 server/collector.js            polls each service (every 1, 5 and 30 minutes)
 server/aggregate.js            turns raw data into what the dashboard shows
 server/automations.js          the automation rules
-server/connectors/*.js         Twilio, Ooma, Google, Meta, Samsara, geocoding
+server/connectors/*.js         Housecall Pro, Twilio, Ooma, Google, Meta, Samsara, geocoding
+server/scripts/gbp-ids.js      npm run gbp-ids
 .env.example                   every setting, with comments
 ```

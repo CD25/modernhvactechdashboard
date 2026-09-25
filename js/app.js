@@ -22,7 +22,7 @@
     { id: "ai", label: "AI Operations Intelligence", sub: "Recommendations", crumb: "AI operations", icon: "spark" },
     { id: "jobs", label: "Job Board", sub: "Book & dispatch", crumb: "Job board", icon: "calendar", live: true },
     { id: "team", label: "Team & Settings", sub: "Accounts, techs, imports", crumb: "Team & settings", icon: "users", live: true },
-  ].filter((v) => !v.live || cfg.dataSource === "api");
+  ].filter((v) => (!v.live || cfg.dataSource === "api") && !(v.id === "jobs" && cfg.jobSource === "housecall"));
   // Pages drawn by board.js; they manage their own data and refresh.
   const BOARD_VIEWS = new Set(["jobs", "team"]);
   const me = cfg.user || null;

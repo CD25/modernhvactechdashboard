@@ -9,6 +9,7 @@
 
 require("../config");
 const geocode = require("../connectors/geocode");
+const hcp = require("../connectors/housecallpro");
 const twilio = require("../connectors/twilio");
 const googleAds = require("../connectors/googleAds");
 const ga4 = require("../connectors/ga4");
@@ -19,6 +20,11 @@ const samsara = require("../connectors/samsara");
 const { daysAgo } = require("../time");
 
 const checks = [
+  ["Housecall Pro", hcp, async () => {
+    const raw = await hcp.get("/jobs", { page: 1, page_size: 1 });
+    const emps = await hcp.employees();
+    return { rawJob: (raw.jobs || [])[0] || "no jobs", employees: emps.length };
+  }],
   ["Google Maps geocoding", geocode, async () => ({ sample: await geocode.geocode(process.env.CHECK_ADDRESS || "1600 Amphitheatre Parkway, Mountain View, CA") })],
   ["Twilio", twilio, async () => {
     const calls = await twilio.callsSince(daysAgo(1));

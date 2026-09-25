@@ -73,6 +73,12 @@ module.exports = {
     callToDispatchMinutes: numOr(env.TARGET_DISPATCH_MINUTES, 10),
   },
 
+  housecall: {
+    apiKey: env.HOUSECALL_API_KEY || "",
+    // Optional map of employee id -> "HVAC" | "Plumbing".
+    trades: parseJson(env.HOUSECALL_TECH_TRADES, {}),
+  },
+
   // Where call numbers come from: "twilio", "ooma" (CSV imports) or "both".
   // "auto" uses Twilio when it is configured, otherwise Ooma imports.
   callSource: (env.CALL_SOURCE || "auto").toLowerCase(),

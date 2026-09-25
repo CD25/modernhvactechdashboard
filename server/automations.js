@@ -12,6 +12,7 @@ const store = require("./store");
 const { raw } = require("./collector");
 const twilio = require("./connectors/twilio");
 const jobBoard = require("./jobs");
+const hcp = require("./connectors/housecallpro");
 const googleAds = require("./connectors/googleAds");
 const meta = require("./connectors/meta");
 const { daysAgo } = require("./time");
@@ -23,7 +24,9 @@ const firstName = (name) => String(name || "").split(" ")[0] || "there";
 const RULES = [
   { id: "textBack", name: "Missed-call text back", category: "Calls", trigger: "Call goes unanswered during business hours", action: "Text the caller a booking link within a minute", needs: () => [twilio.canText()], needsText: "Twilio with a sending number" },
   { id: "afterHours", name: "After-hours callback", category: "Calls", trigger: "Call missed after hours", action: "Text the caller, queue a morning callback", needs: () => [twilio.canText()], needsText: "Twilio with a sending number" },
-  { id: "autoDispatch", name: "Auto-assign nearest tech", category: "Dispatch", trigger: "Job due now with no tech assigned", action: "Assign the closest free tech and text them the job", needs: () => [true], needsText: "" },
+  hcp.enabled()
+    ? { id: "autoDispatch", name: "Nearest-tech suggestion", category: "Dispatch", trigger: "Job in Housecall Pro with no tech assigned", action: "Text the dispatcher the closest free tech", needs: () => [twilio.canText(), Boolean(B.managerPhone)], needsText: "Twilio and MANAGER_PHONE" }
+    : { id: "autoDispatch", name: "Auto-assign nearest tech", category: "Dispatch", trigger: "Job due now with no tech assigned", action: "Assign the closest free tech and text them the job", needs: () => [true], needsText: "" },
   { id: "estimateFollowUp", name: "Estimate follow-up", category: "Sales", trigger: "Estimate open 48 hours", action: "Text the homeowner a follow-up", needs: () => [twilio.canText()], needsText: "Twilio with a sending number" },
   { id: "reviewRequest", name: "Review request", category: "Reputation", trigger: "Job marked done", action: "Text the Google review link", needs: () => [twilio.canText(), Boolean(B.reviewUrl)], needsText: "Twilio and REVIEW_URL" },
   { id: "budgetGuard", name: "Ad budget guard", category: "Marketing", trigger: "Campaign cost per lead above target", action: "Pause the campaign and log it", needs: () => [googleAds.enabled() || meta.enabled()], needsText: "Google Ads or Meta Ads" },
@@ -115,6 +118,12 @@ async function autoDispatch(snapshot) {
     free = free.filter((t) => t !== best.t);
     const tech = raw.employees.find((e) => e.id === best.t.id);
     const far = best.d === null ? "" : ` · ${best.d.toFixed(1)} km away`;
+    if (hcp.enabled()) {
+      // Assignment stays in Housecall Pro; the dispatcher gets the suggestion.
+      await act("autoDispatch", `Suggested ${best.t.name} for ${job.customer}${far}`, () =>
+        twilio.sendSms(B.managerPhone, `Unassigned job in Housecall Pro: ${job.customer}, ${job.address || "no address"}. Closest free tech: ${best.t.name}${far.replace(" · ", ", ")}.`));
+      continue;
+    }
     await act("autoDispatch", `Assigned ${best.t.name} to ${job.customer}${far}`, async () => {
       jobBoard.updateJob(job.id, { action: "assign", techId: best.t.id });
       job.techIds = [best.t.id];

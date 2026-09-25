@@ -235,7 +235,11 @@
             ? "To let staff in from their phones, start the share link on this PC (see the README) and send them that address. They create an account, then you approve it here."
             : `Share <b class="mono">${esc(url)}</b> with staff. They create an account, then you approve it here.`}</p>
         </section>` : ""}
-        <section class="card panel">
+        ${ctx.cfg.jobSource === "housecall" ? `<section class="card panel">
+          <header class="panel-head"><div><h3>Technicians</h3><p class="mono">From Housecall Pro</p></div></header>
+          <ul class="people">${(ctx.S.techs || []).map((t) => `<li><div><b>${esc(t.name)}</b><span class="mono muted">${esc(t.trade)} · ${t.jobsToday} done today</span></div><span class="status ${t.status === "available" ? "good" : t.status === "enroute" ? "info" : "serious"}">${t.status === "available" ? "Available" : t.status === "enroute" ? "On the way" : "On a job"}</span></li>`).join("") || `<li class="empty">No techs with jobs in the last 30 days.</li>`}</ul>
+          <p class="hint">Techs, jobs and On my way are managed in Housecall Pro. Anyone assigned a job in the last 30 days shows here.</p>
+        </section>` : `<section class="card panel">
           <header class="panel-head"><div><h3>Technicians</h3><p class="mono">Who can be assigned jobs</p></div></header>
           <ul class="people">${state.techs.map(techRow).join("") || `<li class="empty">No techs yet.</li>`}</ul>
           ${ctx.isOwner ? `<form class="inline-form" id="tech-form" autocomplete="off">
@@ -244,7 +248,7 @@
             <input id="tf-phone" type="tel" placeholder="Mobile (for job texts)" aria-label="Tech mobile" />
             <button class="btn primary-btn" type="submit">Add tech</button>
           </form>` : ""}
-        </section>
+        </section>`}
         <section class="card panel">
           <header class="panel-head"><div><h3>Ooma call logs</h3><p class="mono">Import calls from Ooma</p></div></header>
           <p class="muted small">In Ooma Office Manager open <b>Call Logs</b>, pick a date range and export to CSV. Upload the file here. Uploading overlapping files is safe: calls already imported are skipped.</p>

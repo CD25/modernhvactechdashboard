@@ -6,7 +6,7 @@
 
 const config = require("./config");
 const store = require("./store");
-const { raw, CONNECTORS } = require("./collector");
+const { raw, CONNECTORS, jobSource } = require("./collector");
 const { REASONS, classify, isEmergency } = require("./classify");
 const { localDate, lastDates, daysAgo } = require("./time");
 const { RULES } = require("./automations");
@@ -118,6 +118,7 @@ function build() {
   const todaysJobs = jobs.filter((j) => (j.scheduledStart >= todayStart && j.scheduledStart < tomorrowStart) || j.createdAt >= todayStart || j.completedAt >= todayStart ||
     (!j.completedAt && (j.onMyWayAt || j.startedAt || (!j.scheduledStart && j.kind !== "estimate" && j.createdAt >= todayStart - 7 * 86400000))));
   const staff = raw.employees;
+  const hcpJobs = jobSource() === "housecall";
   // Truck GPS wins over the last location a tech's phone shared.
   const allGps = [...raw.phoneGps, ...raw.gps];
   const gpsByTech = new Map(allGps.filter((g) => g.techId).map((g) => [g.techId, g]));
@@ -138,7 +139,12 @@ function build() {
     const p = loc ? project(loc.lat, loc.lng) : { x: 50, y: 30 };
     const history = jobs.filter((j) => j.techIds.includes(e.id) && j.scheduledStart && j.startedAt);
     const onTime = history.length ? history.filter((j) => j.startedAt <= j.scheduledStart + 15 * 60000).length / history.length : null;
-    const trade = e.trade || "HVAC";
+    // Housecall Pro doesn't say who is a plumber: go by the jobs they've done unless set in HOUSECALL_TECH_TRADES.
+    let trade = e.trade || "HVAC";
+    if (hcpJobs && !config.housecall.trades[e.id]) {
+      const trades = jobs.filter((j) => j.techIds.includes(e.id)).map((j) => j.reason.trade);
+      if (trades.length) trade = trades.filter((t) => t === "Plumbing").length > trades.length / 2 ? "Plumbing" : "HVAC";
+    }
     const completedToday = mine.filter((j) => j.completedAt >= todayStart);
     return {
       id: e.id, name: e.name, initials: initials(e.name), title: e.role || trade, trade,
@@ -196,6 +202,7 @@ function build() {
 
   return {
     source: "api",
+    jobSource: jobSource(),
     outboundTracked: calls.some((c) => !c.inbound),
     live: config.automationsLive,
     generatedAt: Date.now(),

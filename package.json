@@ -2,13 +2,14 @@
   "name": "modern-hvac-tech-dashboard",
   "version": "1.0.0",
   "private": true,
-  "description": "Live operations dashboard for HVAC and plumbing shops: built-in job board, Twilio and Ooma calls, Google Ads/LSA, GA4, Business Profile, Search Console and Meta Ads, with sign-in.",
+  "description": "Live operations dashboard for HVAC and plumbing shops: Housecall Pro, Twilio (and Ooma), Google Ads/LSA, GA4, Business Profile, Search Console and Meta Ads, with sign-in.",
   "main": "server/index.js",
   "scripts": {
     "start": "node server/index.js",
     "check": "node server/scripts/check.js",
     "google-auth": "node server/scripts/google-auth.js",
-    "reset-password": "node server/scripts/reset-password.js"
+    "reset-password": "node server/scripts/reset-password.js",
+    "gbp-ids": "node server/scripts/gbp-ids.js"
   },
   "engines": {
     "node": ">=18.17"
