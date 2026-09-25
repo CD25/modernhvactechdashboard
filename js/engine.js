@@ -452,7 +452,11 @@
   async function fetchSnapshot() {
     const url = cfg.api.baseUrl + cfg.api.snapshotPath;
     const res = await fetch(url, { headers: cfg.api.headers });
-    if (!res.ok) throw new Error(`Snapshot ${res.status}`);
+    if (!res.ok) {
+      let msg = `Server answered ${res.status}`;
+      try { msg = (await res.json()).error || msg; } catch (e) { /* not JSON */ }
+      throw new Error(msg);
+    }
     const snap = await res.json();
     Object.assign(state, snap);
   }
@@ -481,7 +485,12 @@
     }
   }
 
-  function resumeCampaign(id) {
+  async function resumeCampaign(id) {
+    if (cfg.dataSource === "api") {
+      await fetch(cfg.api.baseUrl + "/api/campaigns/" + encodeURIComponent(id) + "/resume", { method: "POST", headers: cfg.api.headers });
+      await fetchSnapshot();
+      return;
+    }
     const c = state.campaigns.find((x) => x.id === id);
     // Manual override: keep the budget guard off this campaign for an hour.
     if (c) { c.status = "active"; c.snoozeUntil = Date.now() + 60 * 60000; }

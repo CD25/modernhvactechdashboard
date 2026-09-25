@@ -146,8 +146,24 @@
       ${withRange ? `<div class="range" role="tablist" aria-label="Time range">
         ${[["today", "Today"], ["7d", "7 days"], ["30d", "30 days"]].map(([id, l]) => `<button role="tab" data-range="${id}" aria-selected="${ui.range === id}">${l}</button>`).join("")}
       </div>` : ""}
-    </div>`;
+    </div>${sources(ui.view)}`;
   }
+
+  // Which services feed each page (live mode only).
+  const FEEDS = { calls: ["twilio", "housecall"], seo: ["ga4", "gbp", "gsc"], campaigns: ["googleAds", "meta"], dispatch: ["housecall", "samsara"] };
+  const isLive = () => cfg.dataSource === "api";
+
+  function sources(view) {
+    if (!isLive() || !S.connectors) return "";
+    const ids = FEEDS[view];
+    const list = ids ? S.connectors.filter((c) => ids.includes(c.id)) : S.connectors;
+    return `<div class="sources">${list.map((c) => {
+      const st = !c.configured ? ["off", c.optional ? "Optional, not connected" : "Not connected"] : c.ok === false ? ["bad", "Error"] : c.ok ? ["ok", `Synced ${ago(c.lastSync)}`] : ["off", "Connecting…"];
+      return `<span class="source ${st[0]}" title="${esc(c.error || c.feeds)}"><i></i><b>${esc(c.name)}</b>${st[1]}</span>`;
+    }).join("")}</div>`;
+  }
+  const na = (v, f = num) => (v === null || v === undefined ? "—" : f(v));
+  const empty = (text) => `<p class="empty">${text}</p>`;
 
   const rangeLabel = (dailyOnly) => ({ today: dailyOnly ? "Last 7 days" : "Today, by hour", "7d": "Last 7 days", "30d": "Last 30 days" }[ui.range]);
 
@@ -197,8 +213,8 @@
         ${panel("Opportunity queue", "Calls needing a nudge", `
           <ul class="queue">
             ${queueItem("Unscheduled estimates", `${S.opportunities.estimates} homeowners`, "High", "critical", "estimateFollowUp")}
-            ${queueItem("After-hours callbacks", `${S.opportunities.afterHours} to return`, "Due", "warning", "afterHours")}
-            ${queueItem("Maintenance renewals", `${S.opportunities.renewals} due this week`, "Auto", "good", "renewals")}
+            ${queueItem("After-hours callbacks", `${S.opportunities.afterHours} to return`, S.opportunities.afterHours ? "Due" : "Clear", S.opportunities.afterHours ? "warning" : "good", "afterHours")}
+            ${S.opportunities.renewals === null || S.opportunities.renewals === undefined ? "" : queueItem("Maintenance renewals", `${S.opportunities.renewals} due this week`, "Auto", "good", "renewals")}
           </ul>`)}
       </div>`;
   };
@@ -212,33 +228,35 @@
 
   views.seo = function () {
     const { cur, prev, label } = windowStats();
-    const inPack = S.keywords.filter((k) => k.pos <= 3).length;
-    const kws = S.keywords.slice().sort((a, b) => a.pos - b.pos).slice(0, 8);
+    const inPack = S.keywords.filter((k) => k.pos && k.pos <= 3).length;
+    const kws = S.keywords.slice().sort((a, b) => (a.pos || 999) - (b.pos || 999)).slice(0, 8);
     return hero("Regional snapshot", "Be found when the pipe bursts.", "Local intent is moving. See which searches are putting your trucks in front of the right households — rankings, traffic and reviews sync on their own.") +
       `<div class="grid kpis">
         ${kpi({ label: "Organic visitors", value: num(cur.web.organic + cur.web.maps), sub: `${delta(cur.web.organic + cur.web.maps, prev && prev.web.organic + prev.web.maps)} ${label}`, ic: "users" })}
         ${kpi({ label: "Quote requests", value: num(cur.quotes), sub: `${pct(cur.visitors ? cur.quotes / cur.visitors : 0, 1)} visitor conversion`, ic: "chat" })}
-        ${kpi({ label: "Map-pack keywords", value: `${inPack} / ${S.keywords.length}`, sub: "top 3 positions", ic: "pin" })}
-        ${kpi({ label: "Domain backlinks", value: num(S.backlinks), sub: `${S.newBacklinks} new this month`, ic: "link" })}
+        ${kpi({ label: isLive() ? "Top-3 keywords" : "Map-pack keywords", value: S.keywords.length ? `${inPack} / ${S.keywords.length}` : "—", sub: "top 3 positions", ic: "pin" })}
+        ${S.backlinks === null || S.backlinks === undefined
+          ? kpi({ label: "Map views", value: na(S.reviews.mapViews), sub: "Google Maps, last 30 days", ic: "link" })
+          : kpi({ label: "Domain backlinks", value: num(S.backlinks), sub: `${S.newBacklinks} new this month`, ic: "link" })}
       </div>
       <div class="grid two-one">
         ${panel("Local intent, captured", "Keyword position movement · Oakview service area", `
           <table class="table kw">
-            <thead><tr><th>Keyword</th><th>Rank</th><th class="hide-sm">Position</th><th>Change</th><th class="hide-sm num">Searches/mo</th></tr></thead>
+            <thead><tr><th>Keyword</th><th>Rank</th><th class="hide-sm">Position</th><th>Change</th><th class="hide-sm num">${isLive() ? "Impressions/mo" : "Searches/mo"}</th></tr></thead>
             <tbody>${kws.map((k) => {
-              const ch = k.prev - k.pos;
-              return `<tr><td>${esc(k.term)}</td><td><span class="rank ${k.pos <= 3 ? "top" : ""}">#${k.pos}</span></td>
-                <td class="hide-sm"><div class="meter slim"><span style="width:${((13 - k.pos) / 12) * 100}%;background:var(--series-1)"></span></div></td>
+              const ch = k.pos && k.prev ? k.prev - k.pos : 0;
+              return `<tr><td>${esc(k.term)}</td><td><span class="rank ${k.pos && k.pos <= 3 ? "top" : ""}">${k.pos ? "#" + k.pos : "—"}</span></td>
+                <td class="hide-sm"><div class="meter slim"><span style="width:${k.pos ? Math.max(4, ((13 - Math.min(12, k.pos)) / 12) * 100) : 0}%;background:var(--series-1)"></span></div></td>
                 <td>${ch > 0 ? `<span class="delta up">${icon("arrowUp")}${ch}</span>` : ch < 0 ? `<span class="delta down">${icon("arrowDown")}${-ch}</span>` : `<span class="delta">—</span>`}</td>
                 <td class="hide-sm num">${num(k.volume)}</td></tr>`;
             }).join("")}</tbody>
-          </table>`)}
+          </table>${kws.length ? "" : empty("No keyword data yet. Connect Search Console to track positions.")}`)}
         ${panel("Reputation", "Google Business Profile", `
-          <div class="rating"><b>${S.reviews.rating.toFixed(1)}</b><span class="stars">${icon("star")}${icon("star")}${icon("star")}${icon("star")}${icon("star")}</span></div>
-          <p class="muted">${num(S.reviews.count)} reviews</p>
+          <div class="rating"><b>${na(S.reviews.rating, (v) => v.toFixed(1))}</b><span class="stars">${icon("star")}${icon("star")}${icon("star")}${icon("star")}${icon("star")}</span></div>
+          <p class="muted">${na(S.reviews.count)} reviews</p>
           <div class="mini-tiles">
             <div class="mini"><b>${S.reviews.requestsToday}</b><span class="mono">review asks today</span></div>
-            <div class="mini"><b>${num(cur.web.maps)}</b><span class="mono">map-pack visits</span></div>
+            <div class="mini"><b>${S.reviews.mapViews !== undefined ? na(S.reviews.mapViews) : num(cur.web.maps)}</b><span class="mono">${S.reviews.mapViews !== undefined ? "map views · 30d" : "map-pack visits"}</span></div>
           </div>`)}
       </div>
       ${panel("Web traffic pulse", `${rangeLabel(true)} · visits by source`, `<div id="chart-web"></div>`,
@@ -249,17 +267,19 @@
     const { cur, prev, label } = windowStats();
     const spend = S.campaigns.reduce((s, c) => s + c.spendToday, 0);
     const leads = S.campaigns.reduce((s, c) => s + c.leadsToday, 0);
-    const booked = S.campaigns.reduce((s, c) => s + c.bookedToday, 0);
+    const tracked = S.campaigns.filter((c) => c.bookedToday !== null && c.bookedToday !== undefined);
+    const booked = tracked.reduce((s, c) => s + c.bookedToday, 0);
     const cpl = leads ? spend / leads : 0;
     const today = S.days[S.days.length - 1];
     const ticket = today.completed ? today.revenue / today.completed : 420;
-    const roas = spend ? (booked * ticket) / spend : 0;
+    const trackedSpend = tracked.reduce((s, c) => s + c.spendToday, 0);
+    const roas = trackedSpend ? (booked * ticket) / trackedSpend : null;
     return hero("Lead economics", "Spend where the phones ring.", "Budgets pace themselves. Campaigns that drift above your cost-per-lead target are paused automatically, and idle trucks trigger a spend boost.") +
       `<div class="grid kpis">
         ${kpi({ label: "Ad spend today", value: money(spend), sub: `${money(S.campaigns.reduce((s, c) => s + c.dailyBudget, 0))} daily budget`, ic: "dollar" })}
         ${kpi({ label: "Leads today", value: num(leads), sub: `${delta(cur.lsaLeads, prev && prev.lsaLeads)} LSA leads ${label}`, ic: "users" })}
         ${kpi({ label: "Cost per lead", value: money(cpl), sub: `target ${money(cfg.targets.maxCostPerLead)}`, ic: "target", tone: cpl > cfg.targets.maxCostPerLead ? "warn" : "" })}
-        ${kpi({ label: "Return on ad spend", value: `${roas.toFixed(1)}×`, sub: `${num(booked)} jobs booked from ads`, ic: "bolt" })}
+        ${kpi({ label: "Return on ad spend", value: roas === null ? "—" : `${roas.toFixed(1)}×`, sub: tracked.length ? `${num(booked)} jobs booked from ads` : "needs booked-lead data", ic: "bolt" })}
       </div>
       ${panel("Campaigns", "Live pacing · auto-guarded", `
         <div class="table-wrap"><table class="table">
@@ -270,10 +290,10 @@
             <td><div class="meter slim"><span style="width:${Math.min(100, (c.spendToday / c.dailyBudget) * 100)}%;background:var(--series-1)"></span></div><div class="mono muted">${money(c.spendToday)} of ${money(c.dailyBudget)}</div></td>
             <td class="num">${c.leadsToday}</td>
             <td class="num ${c.cpl > cfg.targets.maxCostPerLead ? "bad" : ""}">${money(c.cpl)}</td>
-            <td class="num hide-sm">${c.bookedToday}</td>
+            <td class="num hide-sm">${na(c.bookedToday)}</td>
             <td>${c.status === "paused" ? `<button class="btn ghost" data-resume="${esc(c.id)}">Resume</button>` : ""}</td>
           </tr>`).join("")}</tbody>
-        </table></div>`)}
+        </table></div>${S.campaigns.length ? "" : empty("No campaigns yet. Connect Google Ads or Meta Ads to see spend and leads.")}`)}
       <div class="grid two">
         ${panel("LSA leads &amp; booked jobs", rangeLabel(true), `<div id="chart-lsa"></div>`,
           `<div class="legend"><span><i class="swatch" style="--c:var(--series-1)"></i>Leads</span><span><i class="swatch dashed" style="--c:var(--series-2)"></i>Booked</span></div>`)}
@@ -293,22 +313,24 @@
 
   views.dispatch = function () {
     const count = (s) => S.techs.filter((t) => t.status === s).length;
-    const enroute = S.jobs.filter((j) => j.status === "enroute");
-    const avgEta = enroute.length ? enroute.reduce((s, j) => s + (j.eta || 0), 0) / enroute.length : 0;
-    const open = S.jobs.filter((j) => j.status !== "done").sort((a, b) => ["unassigned", "enroute", "onsite"].indexOf(a.status) - ["unassigned", "enroute", "onsite"].indexOf(b.status));
-    return hero("Live workboard", "Right truck, right door.", "GPS positions stream in from every truck. New bookings are matched to the nearest qualified tech the moment they land.", false) +
+    const withEta = S.jobs.filter((j) => j.status === "enroute" && j.eta);
+    const avgEta = withEta.length ? withEta.reduce((s, j) => s + j.eta, 0) / withEta.length : null;
+    const open = S.jobs.filter((j) => j.status !== "done").sort((a, b) => ["unassigned", "enroute", "onsite", "scheduled"].indexOf(a.status) - ["unassigned", "enroute", "onsite", "scheduled"].indexOf(b.status));
+    return hero("Live workboard", "Right truck, right door.", "Truck positions update as techs move between jobs. New bookings are matched to the nearest qualified tech the moment they land.", false) +
       `<div class="grid kpis">
         ${kpi({ label: "On a job", value: count("onsite"), sub: `${S.techs.length} techs on shift`, ic: "truck" })}
-        ${kpi({ label: "En route", value: count("enroute"), sub: `avg ETA ${Math.round(avgEta)} min`, ic: "nav" })}
+        ${kpi({ label: "En route", value: count("enroute"), sub: avgEta === null ? "ETA needs live GPS" : `avg ETA ${Math.round(avgEta)} min`, ic: "nav" })}
         ${kpi({ label: "Available now", value: count("available"), sub: `${count("break")} on break`, ic: "users" })}
         ${kpi({ label: "Waiting for a truck", value: S.jobs.filter((j) => j.status === "unassigned").length, sub: "unassigned jobs", ic: "alert", tone: S.jobs.filter((j) => j.status === "unassigned").length > 2 ? "warn" : "" })}
       </div>
       <div class="grid two-one">
-        ${panel("Fleet map", `${esc(cfg.company.region)} · live GPS`, `<div class="map-wrap">${mapSvg()}</div>`,
+        ${panel("Fleet map", `${esc(cfg.company.region)} · ${isLive() && !(S.connectors || []).some((c) => c.id === "samsara" && c.configured) ? "positions from job addresses" : "live GPS"}`, `<div class="map-wrap">${mapSvg()}</div>`,
           `<div class="legend">${Object.values(STATUS).map((s) => `<span><i class="dot ${s.cls}"></i>${s.label}</span>`).join("")}<span><i class="dot job"></i>Job</span></div>`)}
         ${panel("Job board", `${open.length} open jobs`, `<ul class="jobs">${open.slice(0, 5).map((j) => {
           const tech = S.techs.find((t) => t.id === j.techId);
-          const st = j.status === "unassigned" ? ["Unassigned", "critical"] : j.status === "enroute" ? [`ETA ${j.eta} min`, "info"] : ["On site", "serious"];
+          const st = j.status === "unassigned" ? ["Unassigned", "critical"]
+            : j.status === "enroute" ? [j.eta ? `ETA ${j.eta} min` : "En route", "info"]
+            : j.status === "scheduled" ? [j.scheduledStart ? clock(j.scheduledStart) : "Scheduled", "muted"] : ["On site", "serious"];
           return `<li><div><b>${esc(j.reasonLabel)}</b><span class="mono muted">${esc(j.customer)} · ${esc(j.address)}, ${esc(j.zone)}</span>
             <span class="mono">${tech ? esc(tech.name) : "—"} ${j.priority === "emergency" ? '<span class="tag critical">Emergency</span>' : ""}</span></div>
             <span class="status ${st[1]}">${st[0]}</span></li>`;
@@ -319,9 +341,9 @@
         <tbody>${S.techs.map((t) => `<tr>
           <td><span class="avatar">${esc(t.initials)}</span><b>${esc(t.name)}</b><div class="mono muted">${esc(t.title)}</div></td>
           <td><span class="status ${STATUS[t.status].cls}">${STATUS[t.status].label}</span></td>
-          <td class="hide-sm mono">${esc(t.truck)}</td>
-          <td class="num">${t.jobsToday}</td><td class="num">${money(t.revenueToday)}</td><td class="num hide-sm">${pct(t.onTime)}</td>
-        </tr>`).join("")}</tbody></table></div>`)}`;
+          <td class="hide-sm mono">${esc(t.truck || "—")}</td>
+          <td class="num">${t.jobsToday}</td><td class="num">${money(t.revenueToday)}</td><td class="num hide-sm">${na(t.onTime, pct)}</td>
+        </tr>`).join("")}</tbody></table></div>${S.techs.length ? "" : empty("No technicians yet. Connect Housecall Pro to see the crew.")}`)}`;
   };
 
   function mapSvg() {
@@ -334,9 +356,9 @@
       <rect x="0" y="0" width="100" height="60" class="map-bg"/>
       <path d="M58,0 C54,14 62,24 56,34 S50,52 54,60" class="river"/>
       ${roads.map((d) => `<path d="${d}" class="road"/>`).join("")}
-      ${E.ZONES.map((z) => `<text x="${z.x}" y="${z.y}" class="zone">${esc(z.name.toUpperCase())}</text>`).join("")}
+      ${(S.zones || E.ZONES).map((z) => `<text x="${z.x}" y="${z.y}" class="zone">${esc(z.name.toUpperCase())}</text>`).join("")}
       ${S.techs.filter((t) => t.status === "enroute").map((t) => { const j = S.jobs.find((x) => x.id === t.jobId); return j ? `<line x1="${t.x.toFixed(1)}" y1="${t.y.toFixed(1)}" x2="${j.x.toFixed(1)}" y2="${j.y.toFixed(1)}" class="route"/>` : ""; }).join("")}
-      ${jobs.map((j) => `<g class="job-pin ${j.status}" transform="translate(${j.x.toFixed(1)},${j.y.toFixed(1)})"><title>${esc(j.reasonLabel)} · ${esc(j.customer)}</title><path d="M0,0 L-1.6,-2.8 A1.8,1.8 0 1 1 1.6,-2.8 Z"/></g>`).join("")}
+      ${jobs.map((j) => `<g class="job-pin ${esc(j.status)}" transform="translate(${j.x.toFixed(1)},${j.y.toFixed(1)})"><title>${esc(j.reasonLabel)} · ${esc(j.customer)}</title><path d="M0,0 L-1.6,-2.8 A1.8,1.8 0 1 1 1.6,-2.8 Z"/></g>`).join("")}
       ${S.techs.map((t) => `<g class="truck ${STATUS[t.status].cls}" transform="translate(${t.x.toFixed(1)},${t.y.toFixed(1)})"><title>${esc(t.name)} · ${STATUS[t.status].label}</title><circle r="2.3"/><text y="0.8">${esc(t.initials)}</text></g>`).join("")}
     </svg>`;
   }
@@ -351,38 +373,39 @@
     const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
     const sameWd = days.filter((d) => new Date(d.date + "T12:00").getDay() === tomorrow.getDay() && d !== days[days.length - 1]);
     const trend = last7.calls / Math.max(1, prev7.calls);
+    if (!last7.calls && !prev7.calls) return out.concat(isLive() ? [{ tone: "info", ic: "phone", title: "Waiting for call history", body: "Insights appear once Twilio and Housecall Pro have a few days of data.", action: "Check connections" }] : []);
     const forecast = sameWd.length ? (sameWd.reduce((s, d) => s + d.calls, 0) / sameWd.length) * trend : last7.calls / 7;
     const techNeeded = Math.ceil((forecast * 0.72) / 5.5);
     out.push({ tone: "info", ic: "calendar", title: `Forecast: ${Math.round(forecast)} calls ${tomorrow.toLocaleDateString([], { weekday: "long" })}`,
       body: `Expect ~${Math.round(forecast * 0.72)} bookings. At 5.5 jobs per tech you need ${techNeeded} techs on the board; ${S.techs.length} are scheduled.`,
       action: techNeeded > S.techs.length ? "Offer overtime" : "Staffing covered" });
     out.push({ tone: coolChg > 0.05 ? "warning" : "good", ic: "bolt", title: `Cooling calls ${coolChg >= 0 ? "up" : "down"} ${Math.abs(coolChg * 100).toFixed(0)}% week over week`,
-      body: coolChg > 0.05 ? "Stock capacitors and contactors on every HVAC truck and push the tune-up offer in Oakview and Pine Hill." : "Shift some HVAC spend toward water-heater and drain campaigns while demand is flat.",
+      body: coolChg > 0.05 ? "Stock capacitors and contactors on every HVAC truck and push the tune-up offer." : "Shift some HVAC spend toward water-heater and drain campaigns while demand is flat.",
       action: coolChg > 0.05 ? "Restock trucks" : "Rebalance budget" });
     const hot = S.campaigns.filter((c) => c.cpl > cfg.targets.maxCostPerLead);
     if (hot.length) out.push({ tone: "critical", ic: "alert", title: `${hot.length} campaign${hot.length > 1 ? "s" : ""} above CPL target`,
-      body: hot.map((c) => `${c.name} at ${money(c.cpl)}`).join(", ") + `. Budget guard ${S.rules.find((r) => r.id === "budgetGuard").enabled ? "is handling it" : "is off — review manually"}.`, action: "Review campaigns", view: "campaigns" });
-    const dropped = S.keywords.filter((k) => k.pos > k.prev).sort((a, b) => b.volume - a.volume)[0];
+      body: hot.map((c) => `${c.name} at ${money(c.cpl)}`).join(", ") + `. Budget guard ${(S.rules.find((r) => r.id === "budgetGuard") || {}).enabled ? "is handling it" : "is off, so review them by hand"}.`, action: "Review campaigns", view: "campaigns" });
+    const dropped = S.keywords.filter((k) => k.pos && k.prev && k.pos > k.prev).sort((a, b) => b.volume - a.volume)[0];
     if (dropped) out.push({ tone: "warning", ic: "search", title: `"${dropped.term}" slipped to #${dropped.pos}`,
-      body: `${num(dropped.volume)} searches a month. Publish a Google Business post and request reviews that mention this service.`, action: "Open local SEO", view: "seo" });
+      body: `${num(dropped.volume)} ${isLive() ? "impressions" : "searches"} a month. Publish a Google Business post and request reviews that mention this service.`, action: "Open local SEO", view: "seo" });
     const missedRate = last7.missed / Math.max(1, last7.calls);
     out.push({ tone: missedRate > 0.04 ? "warning" : "good", ic: "phone", title: `${pct(missedRate, 1)} of calls missed last week`,
-      body: missedRate > 0.04 ? "Missed calls cluster around lunch. Stagger CSR breaks between 11:30 and 1:30." : "The desk is covering the phones well. Text-back is recovering most of the rest.",
+      body: missedRate > 0.04 ? `Today's busiest hour is ${fmtHour(S.hourly.reduce((m, h) => (h.calls > m.calls ? h : m), S.hourly[0]).hour)}. Make sure the desk is fully staffed then.` : "The desk is covering the phones well. Text-back is recovering most of the rest.",
       action: "Open call desk", view: "calls" });
     const best = S.techs.slice().sort((a, b) => b.revenueToday - a.revenueToday)[0];
-    out.push({ tone: "good", ic: "star", title: `${best.name} leads today at ${money(best.revenueToday)}`,
-      body: `${best.jobsToday} jobs, ${pct(best.onTime)} on time. Pair with a newer tech for ride-alongs on install jobs.`, action: "Open dispatch", view: "dispatch" });
+    if (best && best.revenueToday > 0) out.push({ tone: "good", ic: "star", title: `${best.name} leads today at ${money(best.revenueToday)}`,
+      body: `${best.jobsToday} jobs${best.onTime !== null && best.onTime !== undefined ? `, ${pct(best.onTime)} on time` : ""}. Pair with a newer tech for ride-alongs on install jobs.`, action: "Open dispatch", view: "dispatch" });
     return out;
   }
 
   views.ai = function () {
     const ins = insights();
     const runs = S.rules.reduce((s, r) => s + (r.enabled ? r.runsToday : 0), 0);
-    const active = S.rules.filter((r) => r.enabled).length;
+    const active = S.rules.filter((r) => r.enabled && r.available !== false).length;
     return hero("Recommendations", "The shop, running itself.", "Automations handle the routine. This page shows what they did, what the data says next, and a switch for every rule.", false) +
       `<div class="grid kpis">
         ${kpi({ label: "Automations active", value: `${active} / ${S.rules.length}`, sub: "rules running", ic: "bolt" })}
-        ${kpi({ label: "Actions today", value: num(runs), sub: "taken without a person", ic: "check" })}
+        ${kpi({ label: "Actions today", value: num(runs), sub: isLive() && !S.live ? "dry run: logged, not sent" : "taken without a person", ic: "check" })}
         ${kpi({ label: "Hours saved", value: (runs * 4 / 60).toFixed(1), sub: "at ~4 min per task", ic: "clock" })}
         ${kpi({ label: "Insights", value: ins.length, sub: `${ins.filter((i) => i.tone === "critical" || i.tone === "warning").length} need attention`, ic: "spark" })}
       </div>
@@ -393,10 +416,10 @@
       <div class="grid two">
         ${panel("Automation rules", "Toggle to hand a task back to the team", `<ul class="rules">${S.rules.map((r) => `<li>
           <div><b>${esc(r.name)}</b><span class="mono muted">When: ${esc(r.trigger)} → ${esc(r.action)}</span></div>
-          <span class="mono muted runs">${r.runsToday} today</span>
-          <label class="switch"><input type="checkbox" data-rule="${esc(r.id)}" ${r.enabled ? "checked" : ""} aria-label="${esc(r.name)}"><span></span></label>
+          <span class="mono muted runs">${r.available === false ? `Needs ${esc(r.needsText)}` : `${r.runsToday} today`}</span>
+          <label class="switch"><input type="checkbox" data-rule="${esc(r.id)}" ${r.enabled && r.available !== false ? "checked" : ""} ${r.available === false ? "disabled" : ""} aria-label="${esc(r.name)}"><span></span></label>
         </li>`).join("")}</ul>`)}
-        ${panel("Activity log", "Live · newest first", logList(14))}
+        ${panel("Activity log", "Live · newest first", S.log.length ? logList(14) : empty("Nothing yet. Actions appear here as the rules run."))}
       </div>`;
   };
 
@@ -453,7 +476,7 @@
     const v = VIEWS.find((x) => x.id === ui.view);
     $("#crumb").innerHTML = `<span class="mono">${esc(cfg.company.name.split(" ")[0].toUpperCase())}</span> / <b>${v.crumb}</b>`;
     const secs = Math.round((Date.now() - S.lastSync) / 1000);
-    $("#sync").innerHTML = `<i class="pulse ${ui.paused ? "off" : ""}"></i>${ui.paused ? "Paused" : "Live"} · ${cfg.dataSource === "api" ? "API" : "Simulated feed"} · synced ${secs}s ago`;
+    $("#sync").innerHTML = `<i class="pulse ${ui.paused ? "off" : ""}"></i>${ui.paused ? "Paused" : "Live"} · ${isLive() ? (S.live ? "Live data · automations on" : "Live data · automations dry run") : "Simulated feed"} · synced ${secs}s ago`;
     $("#pause").innerHTML = icon(ui.paused ? "play" : "pause");
     $("#pause").setAttribute("aria-label", ui.paused ? "Resume live updates" : "Pause live updates");
     const unseen = S.log.filter((l) => l.t > ui.seenLog).length;
@@ -491,7 +514,7 @@
     const r = e.target.closest("[data-range]");
     if (r) { ui.range = r.dataset.range; try { localStorage.setItem("hvac.range", ui.range); } catch (err) { /* ignore */ } render(); return; }
     const res = e.target.closest("[data-resume]");
-    if (res) { E.resumeCampaign(res.dataset.resume); render(); return; }
+    if (res) { res.disabled = true; Promise.resolve(E.resumeCampaign(res.dataset.resume)).catch((err) => console.error(err)).then(render); return; }
     if (e.target.closest("#pause")) { ui.paused = !ui.paused; renderChrome(); return; }
     if (e.target.closest("#bell")) {
       const open = document.body.classList.toggle("feed-open");
@@ -517,6 +540,7 @@
     if (!ui.paused) {
       try {
         await E.tick();
+        if (!ui.seenLog && S.log.length) ui.seenLog = S.log[0].t;
         // Hold the redraw while someone is reading a tooltip or typing.
         const busy = document.querySelector(".chart:hover") || document.activeElement && document.activeElement.matches("input[type=text]");
         if (!busy) render(); else renderChrome();
@@ -533,7 +557,8 @@
   async function start() {
     renderNav();
     if (cfg.dataSource === "api") {
-      try { await E.tick(); } catch (err) { $("#view").innerHTML = `<div class="card panel"><h3>Could not reach the data API</h3><p class="muted">${esc(err.message)}</p></div>`; }
+      try { await E.tick(); ui.seenLog = S.log.length ? S.log[0].t : 0; }
+      catch (err) { $("#view").innerHTML = `<div class="card panel"><h3>Could not load live data</h3><p class="muted">${esc(err.message)}</p><p class="muted">The server may still be loading history from the connected services. This page retries every few seconds.</p></div>`; }
     }
     if (S.days.length) render();
     setTimeout(loop, cfg.refreshMs);
