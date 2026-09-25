@@ -20,7 +20,13 @@
     { id: "campaigns", label: "Local Campaigns & LSAs", sub: "Lead economics", crumb: "Campaigns", icon: "target" },
     { id: "dispatch", label: "Dispatch, Field Techs & GPS", sub: "Live workboard", crumb: "Dispatch", icon: "nav" },
     { id: "ai", label: "AI Operations Intelligence", sub: "Recommendations", crumb: "AI operations", icon: "spark" },
-  ];
+    { id: "jobs", label: "Job Board", sub: "Book & dispatch", crumb: "Job board", icon: "calendar", live: true },
+    { id: "team", label: "Team & Settings", sub: "Accounts, techs, imports", crumb: "Team & settings", icon: "users", live: true },
+  ].filter((v) => !v.live || cfg.dataSource === "api");
+  // Pages drawn by board.js; they manage their own data and refresh.
+  const BOARD_VIEWS = new Set(["jobs", "team"]);
+  const me = cfg.user || null;
+  const isOwner = !me || me.role === "owner";
 
   const ICONS = {
     phone: '<path d="M5 4h4l2 5-2.5 1.5a11 11 0 0 0 5 5L15 13l5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 6a2 2 0 0 1 2-2"/>',
@@ -50,7 +56,7 @@
   const icon = (name, cls = "") => `<svg class="ico ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ""}</svg>`;
 
   const ui = {
-    view: (location.hash.slice(1) in { calls: 1, seo: 1, campaigns: 1, dispatch: 1, ai: 1 }) ? location.hash.slice(1) : "calls",
+    view: VIEWS.some((v) => v.id === location.hash.slice(1)) ? location.hash.slice(1) : "calls",
     range: "7d",
     paused: false,
     seenLog: S.log.length ? S.log[0].t : 0,
@@ -185,7 +191,9 @@
     return hero("Desk pulse", "Every ring is a truck roll.", "Calls, bookings and callbacks flow in automatically from the phone system. Missed calls get a text back before the caller dials a competitor.") +
       `<div class="grid kpis">
         ${kpi({ label: "Inbound calls", value: num(cur.calls), sub: `${delta(cur.calls, prev && prev.calls)} ${label}`, ic: "phone" })}
-        ${kpi({ label: "Outbound follow-up", value: num(cur.outbound), sub: `${num(cur.callbacks)} callbacks completed`, ic: "phone" })}
+        ${S.outboundTracked === false
+          ? kpi({ label: "Outbound follow-up", value: "—", sub: "Outbound calls aren't set up yet", ic: "phone" })
+          : kpi({ label: "Outbound follow-up", value: num(cur.outbound), sub: `${num(cur.callbacks)} callbacks completed`, ic: "phone" })}
         ${kpi({ label: "Appointments booked", value: num(cur.booked), sub: `${pct(conv, 1)} conversion`, ic: "calendar" })}
         ${kpi({ label: "Call → dispatch", value: `${Math.floor(Math.round(avgDispatch) / 60)}m ${String(Math.round(avgDispatch) % 60).padStart(2, "0")}s`, sub: `${prevDispatch ? delta(avgDispatch, prevDispatch, { invert: true, unit: "s" }) + (avgDispatch <= prevDispatch ? " faster" : " slower") : "average time to assign"}`, ic: "clock" })}
       </div>
@@ -291,7 +299,7 @@
             <td class="num">${c.leadsToday}</td>
             <td class="num ${c.cpl > cfg.targets.maxCostPerLead ? "bad" : ""}">${money(c.cpl)}</td>
             <td class="num hide-sm">${na(c.bookedToday)}</td>
-            <td>${c.status === "paused" ? `<button class="btn ghost" data-resume="${esc(c.id)}">Resume</button>` : ""}</td>
+            <td>${c.status === "paused" && isOwner ? `<button class="btn ghost" data-resume="${esc(c.id)}">Resume</button>` : ""}</td>
           </tr>`).join("")}</tbody>
         </table></div>${S.campaigns.length ? "" : empty("No campaigns yet. Connect Google Ads or Meta Ads to see spend and leads.")}`)}
       <div class="grid two">
@@ -414,10 +422,10 @@
         <div><h4>${esc(i.title)}</h4><p>${esc(i.body)}</p>${i.view ? `<a class="link" href="#${i.view}">${esc(i.action)} →</a>` : `<span class="link muted">${esc(i.action)}</span>`}</div>
       </article>`).join("")}</div>
       <div class="grid two">
-        ${panel("Automation rules", "Toggle to hand a task back to the team", `<ul class="rules">${S.rules.map((r) => `<li>
+        ${panel("Automation rules", isOwner ? "Toggle to hand a task back to the team" : "Only the owner can change these", `<ul class="rules">${S.rules.map((r) => `<li>
           <div><b>${esc(r.name)}</b><span class="mono muted">When: ${esc(r.trigger)} → ${esc(r.action)}</span></div>
           <span class="mono muted runs">${r.available === false ? `Needs ${esc(r.needsText)}` : `${r.runsToday} today`}</span>
-          <label class="switch"><input type="checkbox" data-rule="${esc(r.id)}" ${r.enabled && r.available !== false ? "checked" : ""} ${r.available === false ? "disabled" : ""} aria-label="${esc(r.name)}"><span></span></label>
+          <label class="switch"><input type="checkbox" data-rule="${esc(r.id)}" ${r.enabled && r.available !== false ? "checked" : ""} ${r.available === false || !isOwner ? "disabled" : ""} aria-label="${esc(r.name)}"><span></span></label>
         </li>`).join("")}</ul>`)}
         ${panel("Activity log", "Live · newest first", S.log.length ? logList(14) : empty("Nothing yet. Actions appear here as the rules run."))}
       </div>`;
@@ -469,7 +477,8 @@
       ${icon(v.icon)}<span><b>${v.label}</b><small class="mono">${v.sub}</small></span></a>`).join("");
     $("#user-name").textContent = cfg.company.manager.name;
     $("#user-role").textContent = cfg.company.manager.role;
-    $("#avatar").textContent = cfg.company.manager.name.split(" ").map((s) => s[0]).join("");
+    $("#avatar").textContent = cfg.company.manager.name.split(/\s+/).map((s) => s[0] || "").join("").slice(0, 2).toUpperCase();
+    $("#user-menu-btn").disabled = !me;
   }
 
   function renderChrome() {
@@ -487,8 +496,17 @@
     $("#foot-status").textContent = `Dispatch online · ${online} trucks`;
   }
 
+  function boardCtx() {
+    return { S, cfg, me, isOwner, icon, esc, money, clock, ago, refreshData: async () => { try { await E.tick(); } catch (e) { /* shown in chrome */ } renderChrome(); } };
+  }
+
   function render() {
     const root = $("#view");
+    if (BOARD_VIEWS.has(ui.view)) {
+      window.HVAC_BOARD.render(ui.view, root, boardCtx());
+      renderChrome();
+      return;
+    }
     const scroll = root.scrollTop;
     root.innerHTML = views[ui.view]();
     root.scrollTop = scroll;
@@ -522,6 +540,13 @@
       return;
     }
     if (e.target.closest("#menu")) { document.body.classList.toggle("nav-open"); return; }
+    if (e.target.closest("#user-menu-btn")) { $("#user-menu").hidden = !$("#user-menu").hidden; return; }
+    if (e.target.closest("#sign-out")) {
+      fetch("/api/auth/logout", { method: "POST" }).finally(() => { location.href = "/login"; });
+      return;
+    }
+    if (e.target.closest("#change-password")) { $("#user-menu").hidden = true; location.hash = "team"; setTimeout(() => { const f = $("#pw-current"); if (f) f.focus(); }, 50); return; }
+    if (!e.target.closest("#user-menu")) $("#user-menu").hidden = true;
     if (document.body.classList.contains("feed-open") && !e.target.closest("#feed-panel")) document.body.classList.remove("feed-open");
   });
 
@@ -542,7 +567,7 @@
         await E.tick();
         if (!ui.seenLog && S.log.length) ui.seenLog = S.log[0].t;
         // Hold the redraw while someone is reading a tooltip or typing.
-        const busy = document.querySelector(".chart:hover") || document.activeElement && document.activeElement.matches("input[type=text]");
+        const busy = BOARD_VIEWS.has(ui.view) || document.querySelector(".chart:hover") || document.activeElement && document.activeElement.matches("input, select, textarea");
         if (!busy) render(); else renderChrome();
         if (document.body.classList.contains("feed-open")) { ui.seenLog = S.log.length ? S.log[0].t : 0; renderFeed(); }
       } catch (err) {

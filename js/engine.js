@@ -452,6 +452,7 @@
   async function fetchSnapshot() {
     const url = cfg.api.baseUrl + cfg.api.snapshotPath;
     const res = await fetch(url, { headers: cfg.api.headers });
+    if (res.status === 401) { location.href = "/login"; throw new Error("Signed out"); }
     if (!res.ok) {
       let msg = `Server answered ${res.status}`;
       try { msg = (await res.json()).error || msg; } catch (e) { /* not JSON */ }

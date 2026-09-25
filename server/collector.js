@@ -5,7 +5,10 @@
  */
 "use strict";
 
-const hcp = require("./connectors/housecallpro");
+const config = require("./config");
+const jobBoard = require("./jobs");
+const ooma = require("./connectors/ooma");
+const geocode = require("./connectors/geocode");
 const twilio = require("./connectors/twilio");
 const googleAds = require("./connectors/googleAds");
 const ga4 = require("./connectors/ga4");
@@ -16,15 +19,27 @@ const samsara = require("./connectors/samsara");
 const { daysAgo } = require("./time");
 
 const CONNECTORS = [
-  { id: "housecall", name: "Housecall Pro", mod: hcp, feeds: "Jobs, techs, estimates, revenue" },
+  { id: "jobs", name: "Job board", mod: { enabled: () => true }, feeds: "Jobs, techs, estimates, revenue" },
   { id: "twilio", name: "Twilio", mod: twilio, feeds: "Calls and text messages" },
+  { id: "ooma", name: "Ooma call logs", mod: { enabled: () => useOoma() }, feeds: "Calls from Ooma CSV imports" },
   { id: "googleAds", name: "Google Ads & LSA", mod: googleAds, feeds: "Ad spend, leads, LSA" },
   { id: "ga4", name: "Google Analytics", mod: ga4, feeds: "Website traffic, quote requests" },
   { id: "gbp", name: "Business Profile", mod: gbp, feeds: "Reviews, map views" },
   { id: "gsc", name: "Search Console", mod: gsc, feeds: "Keyword positions" },
   { id: "meta", name: "Meta Ads", mod: meta, feeds: "Facebook & Instagram campaigns" },
   { id: "samsara", name: "Samsara GPS", mod: samsara, feeds: "Live truck locations", optional: true },
+  { id: "geocode", name: "Google Maps", mod: geocode, feeds: "Job addresses on the map", optional: true },
 ];
+
+// Which phone source counts calls (see CALL_SOURCE in .env.example).
+function useTwilioCalls() {
+  const src = config.callSource;
+  return twilio.enabled() && (src === "twilio" || src === "both" || src === "auto");
+}
+function useOoma() {
+  const src = config.callSource;
+  return src === "ooma" || src === "both" || (src === "auto" && !twilio.enabled() && ooma.calls().length > 0);
+}
 
 const raw = {
   calls: new Map(),
@@ -39,6 +54,7 @@ const raw = {
   gbpPerf: null,
   keywords: [],
   gps: [],
+  phoneGps: [],
   status: Object.fromEntries(CONNECTORS.map((c) => [c.id, { ok: null, error: null, lastSync: null }])),
 };
 
@@ -61,20 +77,32 @@ function trim() {
   for (const [k, j] of raw.jobs) if (Math.max(j.createdAt || 0, j.scheduledStart || 0, j.completedAt || 0) < cutoff) raw.jobs.delete(k);
 }
 
-// Every minute: today's calls, jobs and truck positions.
+// Job board and Ooma imports live on this machine, so they reload instantly.
+function local() {
+  raw.jobs = new Map(jobBoard.normalized().map((j) => [j.id, j]));
+  raw.employees = jobBoard.employees();
+  raw.estimates = jobBoard.estimates();
+  raw.phoneGps = jobBoard.techLocations();
+  raw.status.jobs = { ok: true, error: null, lastSync: Date.now() };
+  if (geocode.enabled()) raw.status.geocode = { ok: true, error: null, lastSync: Date.now() };
+  for (const [k, c] of raw.calls) if (c.source === "ooma") raw.calls.delete(k);
+  if (useOoma()) {
+    for (const c of ooma.calls()) raw.calls.set(c.sid, c);
+    const last = ooma.lastImport();
+    raw.status.ooma = { ok: true, error: null, lastSync: last ? last.at : null };
+  }
+  if (!useTwilioCalls()) for (const [k, c] of raw.calls) if (c.source !== "ooma") raw.calls.delete(k);
+}
+
+// Every minute: today's calls and truck positions.
 async function fast() {
-  const todayStart = daysAgo(0).getTime();
-  const tomorrow = daysAgo(-1).getTime();
   await Promise.all([
-    run("twilio", async () => {
+    useTwilioCalls() && run("twilio", async () => {
       for (const c of await twilio.callsSince(daysAgo(1))) raw.calls.set(c.sid, c);
-    }),
-    run("housecall", async () => {
-      const [recent, today] = await Promise.all([hcp.jobsSince(daysAgo(1).getTime()), hcp.jobsScheduledBetween(todayStart, tomorrow)]);
-      for (const j of [...recent, ...today]) raw.jobs.set(j.id, j);
     }),
     run("samsara", async () => { raw.gps = await samsara.vehicleLocations(); }),
   ]);
+  local();
   trim();
 }
 
@@ -83,20 +111,14 @@ async function medium() {
   await Promise.all([
     run("googleAds", async () => { raw.adsCampaigns = await googleAds.campaignsToday(); }),
     run("meta", async () => { raw.metaCampaigns = await meta.campaignsToday(); }),
-    run("housecall", async () => { raw.estimates = await hcp.estimatesSince(daysAgo(30).getTime()); }),
   ]);
 }
 
 // Every 30 minutes: 30-day history and the slower marketing sources.
 async function slow() {
   await Promise.all([
-    run("twilio", async () => {
+    useTwilioCalls() && run("twilio", async () => {
       for (const c of await twilio.callsSince(daysAgo(30))) raw.calls.set(c.sid, c);
-    }),
-    run("housecall", async () => {
-      const [jobs, emps] = await Promise.all([hcp.jobsSince(daysAgo(30).getTime()), hcp.employees()]);
-      for (const j of jobs) raw.jobs.set(j.id, j);
-      raw.employees = emps;
     }),
     run("googleAds", async () => { raw.lsa = await googleAds.lsaHistory(30); }),
     run("ga4", async () => { raw.web = await ga4.daily(30); }),
@@ -109,4 +131,4 @@ async function slow() {
   trim();
 }
 
-module.exports = { raw, CONNECTORS, fast, medium, slow };
+module.exports = { raw, CONNECTORS, fast, medium, slow, local };

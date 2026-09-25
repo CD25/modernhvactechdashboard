@@ -3,8 +3,8 @@
  *
  *   npm start
  *
- * Serves the dashboard, polls every connected service, runs the automation
- * rules, and answers the dashboard's snapshot requests.
+ * Serves the dashboard behind email/password sign-in, polls every connected
+ * service, runs the automation rules, and hosts the job board.
  */
 "use strict";
 
@@ -12,27 +12,46 @@ const config = require("./config"); // loads .env first
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
-const crypto = require("crypto");
+const os = require("os");
 const store = require("./store");
+const auth = require("./auth");
+const jobBoard = require("./jobs");
+const ooma = require("./connectors/ooma");
 const collector = require("./collector");
 const { build } = require("./aggregate");
 const automations = require("./automations");
 
 const ROOT = path.join(__dirname, "..");
-const STATIC = new Set(["/index.html", "/css/styles.css", "/js/engine.js", "/js/charts.js", "/js/app.js"]);
-const TYPES = { ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8" };
+const PUBLIC = new Map([
+  ["/login", "login.html"],
+  ["/css/styles.css", "css/styles.css"],
+  ["/manifest.webmanifest", "manifest.webmanifest"],
+  ["/icon.svg", "icon.svg"],
+]);
+const PRIVATE = new Map([
+  ["/", "index.html"],
+  ["/index.html", "index.html"],
+  ["/js/engine.js", "js/engine.js"],
+  ["/js/charts.js", "js/charts.js"],
+  ["/js/app.js", "js/app.js"],
+  ["/js/board.js", "js/board.js"],
+]);
+const TYPES = {
+  ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8",
+  ".svg": "image/svg+xml", ".webmanifest": "application/manifest+json",
+};
 
 let snapshot = null;
 let ready = false;
 
 function refresh() {
-  try { snapshot = build(); } catch (e) { console.error("Could not build snapshot:", e); }
+  try { collector.local(); snapshot = build(); } catch (e) { console.error("Could not build snapshot:", e); }
 }
 
 // ---------- polling ----------
 function every(ms, fn) {
   let running = false;
-  const tick = async () => {
+  setInterval(async () => {
     if (running) return;
     running = true;
     try {
@@ -45,12 +64,11 @@ function every(ms, fn) {
     } finally {
       running = false;
     }
-  };
-  setInterval(tick, ms);
-  return tick;
+  }, ms);
 }
 
 async function start() {
+  refresh();
   console.log("Loading history from connected services…");
   await collector.slow();
   await collector.medium();
@@ -58,49 +76,77 @@ async function start() {
   refresh();
   ready = true;
   store.prune();
+  auth.pruneSessions();
   every(60 * 1000, collector.fast);
   every(5 * 60 * 1000, collector.medium);
-  every(30 * 60 * 1000, async () => { await collector.slow(); store.prune(); });
-  // Snapshot rebuild keeps "live" clocks and statuses current between polls.
+  every(30 * 60 * 1000, async () => { await collector.slow(); store.prune(); auth.pruneSessions(); });
   setInterval(refresh, 15 * 1000);
   await automations.runAll(snapshot);
   refresh();
   const live = collector.CONNECTORS.filter((c) => c.mod.enabled()).map((c) => c.name);
-  console.log(`Connected: ${live.join(", ") || "nothing yet - fill in .env"}`);
+  console.log(`Connected: ${live.join(", ")}`);
   console.log(`Automations: ${config.automationsLive ? "LIVE" : "dry run (set AUTOMATIONS_LIVE=true to act)"}`);
 }
 
-// ---------- http ----------
-function authorized(req) {
-  if (!config.dashboardPassword) return true;
-  const header = req.headers.authorization || "";
-  const [user, pass] = Buffer.from(header.replace(/^Basic /, ""), "base64").toString().split(":");
-  const safe = (a, b) => {
-    const x = Buffer.from(String(a)), y = Buffer.from(String(b));
-    return x.length === y.length && crypto.timingSafeEqual(x, y);
-  };
-  return safe(user || "", config.dashboardUser) && safe(pass || "", config.dashboardPassword);
-}
+// ---------- helpers ----------
+const SECURITY_HEADERS = {
+  "X-Content-Type-Options": "nosniff",
+  "X-Frame-Options": "DENY",
+  "Referrer-Policy": "same-origin",
+  "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'",
+};
 
-function send(res, status, body, type = "application/json") {
-  res.writeHead(status, { "Content-Type": type, "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" });
+function send(res, status, body, type = "application/json", extra = {}) {
+  res.writeHead(status, { "Content-Type": type, "Cache-Control": "no-store", ...SECURITY_HEADERS, ...extra });
   res.end(typeof body === "string" || Buffer.isBuffer(body) ? body : JSON.stringify(body));
 }
 
-function readBody(req) {
+function redirect(res, to) {
+  res.writeHead(302, { Location: to, "Cache-Control": "no-store" });
+  res.end();
+}
+
+function readBody(req, limit = 1e5) {
   return new Promise((resolve, reject) => {
     let data = "";
-    req.on("data", (c) => { data += c; if (data.length > 1e5) req.destroy(); });
-    req.on("end", () => { try { resolve(data ? JSON.parse(data) : {}); } catch (e) { reject(e); } });
+    req.setEncoding("utf8");
+    req.on("data", (c) => {
+      data += c;
+      if (data.length > limit) { reject(auth.userError("That upload is too large.", 413)); req.destroy(); }
+    });
+    req.on("end", () => resolve(data));
     req.on("error", reject);
   });
 }
 
+async function readJson(req) {
+  if (!String(req.headers["content-type"] || "").includes("application/json")) throw auth.userError("Expected JSON.", 415);
+  const text = await readBody(req);
+  try { return text ? JSON.parse(text) : {}; } catch (e) { throw auth.userError("Invalid JSON."); }
+}
+
+// Changes must come from this site (blocks cross-site form posts).
+function sameOrigin(req) {
+  const origin = req.headers.origin;
+  if (!origin) return true;
+  try { return new URL(origin).host === req.headers.host; } catch (e) { return false; }
+}
+
+const isLocal = (req) => !req.headers["cf-connecting-ip"] && !req.headers["x-forwarded-for"] &&
+  ["127.0.0.1", "::1", "::ffff:127.0.0.1"].includes(req.socket.remoteAddress);
+const clientIp = (req) => String(req.headers["cf-connecting-ip"] || req.headers["x-forwarded-for"] || req.socket.remoteAddress || "").split(",")[0].trim();
+
+function serveFile(res, file) {
+  send(res, 200, fs.readFileSync(path.join(ROOT, file)), TYPES[path.extname(file)] || "application/octet-stream",
+    { "Cache-Control": file.endsWith(".html") ? "no-store" : "no-cache" });
+}
+
 // The browser config: live mode, pointed back at this server.
-function browserConfig() {
+function browserConfig(user) {
   const b = config.business;
   return `window.HVAC_CONFIG = ${JSON.stringify({
-    company: { name: b.name, tagline: b.tagline, region: b.region, manager: { name: b.manager, role: b.managerRole } },
+    company: { name: b.name, tagline: b.tagline, region: b.region, manager: { name: user.name, role: user.role === "owner" ? "Owner" : "Staff" } },
+    user: auth.publicUser(user),
     dataSource: "api",
     refreshMs: 10000,
     api: { baseUrl: "", snapshotPath: "/api/dashboard/snapshot", rulesPath: "/api/automations", headers: {} },
@@ -108,52 +154,161 @@ function browserConfig() {
   }, null, 2)};\n`;
 }
 
-const server = http.createServer(async (req, res) => {
-  const url = new URL(req.url, "http://localhost");
+// ---------- routes ----------
+async function route(req, res, url) {
   const p = url.pathname;
+  const method = req.method;
 
   if (p === "/healthz") return send(res, 200, { ok: true, ready });
-  if (!authorized(req)) {
-    res.writeHead(401, { "WWW-Authenticate": 'Basic realm="Dashboard"' });
-    return res.end("Sign in required");
+  if (method === "GET" && PUBLIC.has(p)) return serveFile(res, PUBLIC.get(p));
+  if (method !== "GET" && method !== "HEAD" && !sameOrigin(req)) return send(res, 403, { error: "Request blocked." });
+
+  // ----- sign-in -----
+  if (p === "/api/auth/status" && method === "GET") {
+    return send(res, 200, { hasUsers: auth.hasUsers(), business: config.business.name, canCreateOwner: isLocal(req) || Boolean(config.ownerEmail) });
+  }
+  if (p === "/api/auth/signup" && method === "POST") {
+    const body = await readJson(req);
+    // Stops a stranger with the link from claiming the owner account first.
+    if (!auth.hasUsers() && !isLocal(req) && String(body.email || "").trim().toLowerCase() !== config.ownerEmail) {
+      throw auth.userError("Create the owner account on the PC that runs the dashboard (open http://localhost:" + config.port + " there), or set OWNER_EMAIL.", 403);
+    }
+    const user = auth.signup(body);
+    if (user.status === "active") {
+      const s = auth.createSession(user);
+      return send(res, 200, { ok: true, user: auth.publicUser(user) }, "application/json", { "Set-Cookie": auth.sessionCookie(req, s.token) });
+    }
+    store.log("system", `New account waiting for approval: ${user.name} (${user.email})`);
+    return send(res, 200, { ok: true, pending: true });
+  }
+  if (p === "/api/auth/login" && method === "POST") {
+    const s = auth.login(await readJson(req), clientIp(req));
+    return send(res, 200, { ok: true, user: auth.publicUser(s.user) }, "application/json", { "Set-Cookie": auth.sessionCookie(req, s.token) });
+  }
+  if (p === "/api/auth/logout" && method === "POST") {
+    auth.endSession(req);
+    return send(res, 200, { ok: true }, "application/json", { "Set-Cookie": auth.clearCookie(req) });
   }
 
+  // Everything below needs a signed-in, approved account.
+  const user = auth.currentUser(req);
+  if (!user) {
+    if (p.startsWith("/api/")) return send(res, 401, { error: "Please sign in." });
+    return redirect(res, "/login");
+  }
+  const owner = user.role === "owner";
+  const ownerOnly = () => { if (!owner) throw auth.userError("Only the owner can do this.", 403); };
+
+  if (method === "GET" && p === "/js/config.js") return send(res, 200, browserConfig(user), TYPES[".js"]);
+  if (method === "GET" && PRIVATE.has(p)) return serveFile(res, PRIVATE.get(p));
+
+  if (p === "/api/auth/me" && method === "GET") return send(res, 200, auth.publicUser(user));
+  if (p === "/api/auth/password" && method === "POST") {
+    auth.changePassword(user, await readJson(req));
+    return send(res, 200, { ok: true });
+  }
+
+  // ----- dashboard data -----
+  if (p === "/api/dashboard/snapshot" && method === "GET") {
+    if (!snapshot) return send(res, 503, { error: "Still loading data from connected services. Try again in a minute." });
+    return send(res, 200, snapshot);
+  }
+  if (method === "PATCH" && p.startsWith("/api/automations/")) {
+    ownerOnly();
+    const id = decodeURIComponent(p.split("/").pop());
+    if (!automations.RULES.some((r) => r.id === id)) return send(res, 404, { error: "Unknown rule" });
+    const { enabled } = await readJson(req);
+    store.state.rules[id] = Boolean(enabled);
+    store.log(id, `${user.name} turned this rule ${enabled ? "on" : "off"}`);
+    refresh();
+    return send(res, 200, { ok: true });
+  }
+  if (method === "POST" && /^\/api\/campaigns\/[^/]+\/resume$/.test(p)) {
+    ownerOnly();
+    await automations.resumeCampaign(decodeURIComponent(p.split("/")[3]), snapshot);
+    await collector.medium();
+    refresh();
+    return send(res, 200, { ok: true });
+  }
+
+  // ----- job board -----
+  if (p === "/api/jobs" && method === "GET") {
+    return send(res, 200, { jobs: jobBoard.recent(45), techs: jobBoard.techs() });
+  }
+  if (p === "/api/jobs" && method === "POST") {
+    const job = jobBoard.addJob(await readJson(req), user);
+    store.log("jobs", `${user.name} added ${job.kind === "estimate" ? "an estimate" : "a job"} for ${job.customer}`);
+    refresh();
+    return send(res, 200, job);
+  }
+  if (/^\/api\/jobs\/[^/]+$/.test(p) && method === "PATCH") {
+    const job = jobBoard.updateJob(decodeURIComponent(p.split("/")[3]), await readJson(req));
+    refresh();
+    return send(res, 200, job);
+  }
+  if (p === "/api/techs" && method === "POST") {
+    ownerOnly();
+    return send(res, 200, jobBoard.addTech(await readJson(req)));
+  }
+  if (/^\/api\/techs\/[^/]+$/.test(p) && method === "PATCH") {
+    ownerOnly();
+    const t = jobBoard.updateTech(decodeURIComponent(p.split("/")[3]), await readJson(req));
+    refresh();
+    return send(res, 200, t);
+  }
+
+  // ----- Ooma call log import -----
+  if (p === "/api/import/ooma" && method === "POST") {
+    const result = ooma.importCsv(await readBody(req, 20e6), user.name);
+    store.log("system", `${user.name} imported Ooma call log: ${result.added} new calls`);
+    refresh();
+    return send(res, 200, { ...result, counted: collector.CONNECTORS.find((c) => c.id === "ooma").mod.enabled() });
+  }
+
+  // ----- team (owner) -----
+  if (p === "/api/users" && method === "GET") {
+    ownerOnly();
+    return send(res, 200, auth.listUsers());
+  }
+  if (/^\/api\/users\/[^/]+$/.test(p) && method === "PATCH") {
+    ownerOnly();
+    const u = auth.updateUser(user, decodeURIComponent(p.split("/")[3]), await readJson(req));
+    store.log("system", `${user.name} set ${u.email} to ${u.status}${u.role === "owner" ? " (owner)" : ""}`);
+    return send(res, 200, auth.publicUser(u));
+  }
+  if (/^\/api\/users\/[^/]+$/.test(p) && method === "DELETE") {
+    ownerOnly();
+    auth.removeUser(user, decodeURIComponent(p.split("/")[3]));
+    return send(res, 200, { ok: true });
+  }
+  if (/^\/api\/users\/[^/]+\/reset-password$/.test(p) && method === "POST") {
+    ownerOnly();
+    return send(res, 200, { temporaryPassword: auth.resetPassword(user, decodeURIComponent(p.split("/")[3])) });
+  }
+
+  send(res, 404, { error: "Not found" });
+}
+
+const server = http.createServer(async (req, res) => {
+  const url = new URL(req.url, "http://localhost");
   try {
-    if (req.method === "GET" && p === "/api/dashboard/snapshot") {
-      if (!snapshot) return send(res, 503, { error: "Still loading data from connected services. Try again in a minute." });
-      return send(res, 200, snapshot);
-    }
-    if (req.method === "PATCH" && p.startsWith("/api/automations/")) {
-      const id = decodeURIComponent(p.split("/").pop());
-      if (!automations.RULES.some((r) => r.id === id)) return send(res, 404, { error: "Unknown rule" });
-      const { enabled } = await readBody(req);
-      store.state.rules[id] = Boolean(enabled);
-      store.log(id, `Rule turned ${enabled ? "on" : "off"} from the dashboard`);
-      refresh();
-      return send(res, 200, { ok: true });
-    }
-    if (req.method === "POST" && /^\/api\/campaigns\/[^/]+\/resume$/.test(p)) {
-      await automations.resumeCampaign(decodeURIComponent(p.split("/")[3]), snapshot);
-      await collector.medium();
-      refresh();
-      return send(res, 200, { ok: true });
-    }
-    if (req.method === "GET" && p === "/js/config.js") return send(res, 200, browserConfig(), TYPES[".js"]);
-    if (req.method === "GET") {
-      const file = p === "/" ? "/index.html" : p;
-      if (STATIC.has(file)) {
-        return send(res, 200, fs.readFileSync(path.join(ROOT, file)), TYPES[path.extname(file)]);
-      }
-    }
-    send(res, 404, { error: "Not found" });
+    await route(req, res, url);
   } catch (e) {
-    console.error(e);
-    send(res, 500, { error: e.message });
+    if (!e.expose) console.error(e);
+    if (!res.headersSent) send(res, e.status || 500, { error: e.expose ? e.message : "Something went wrong on the server." });
   }
 });
 
-server.listen(config.port, () => {
-  console.log(`Dashboard on http://localhost:${config.port}`);
-  if (!config.dashboardPassword) console.warn("DASHBOARD_PASSWORD is empty: anyone who can reach this port can see the dashboard.");
+function lanAddresses() {
+  return Object.values(os.networkInterfaces()).flat()
+    .filter((i) => i && i.family === "IPv4" && !i.internal).map((i) => `http://${i.address}:${config.port}`);
+}
+
+server.listen(config.port, config.host, () => {
+  console.log(`\nDashboard is running:`);
+  console.log(`  On this PC:        http://localhost:${config.port}`);
+  for (const a of lanAddresses()) console.log(`  Same Wi-Fi/office: ${a}`);
+  console.log(`  From anywhere:     run share-link (see README)\n`);
+  if (!auth.hasUsers()) console.log("No accounts yet: open the dashboard and create the owner account first.\n");
   start().catch((e) => console.error("Startup failed:", e));
 });

@@ -11,7 +11,7 @@ const config = require("./config");
 const store = require("./store");
 const { raw } = require("./collector");
 const twilio = require("./connectors/twilio");
-const hcp = require("./connectors/housecallpro");
+const jobBoard = require("./jobs");
 const googleAds = require("./connectors/googleAds");
 const meta = require("./connectors/meta");
 const { daysAgo } = require("./time");
@@ -23,11 +23,11 @@ const firstName = (name) => String(name || "").split(" ")[0] || "there";
 const RULES = [
   { id: "textBack", name: "Missed-call text back", category: "Calls", trigger: "Call goes unanswered during business hours", action: "Text the caller a booking link within a minute", needs: () => [twilio.canText()], needsText: "Twilio with a sending number" },
   { id: "afterHours", name: "After-hours callback", category: "Calls", trigger: "Call missed after hours", action: "Text the caller, queue a morning callback", needs: () => [twilio.canText()], needsText: "Twilio with a sending number" },
-  { id: "autoDispatch", name: "Nearest-tech suggestion", category: "Dispatch", trigger: "Job booked with no tech assigned", action: "Text the dispatcher the closest available tech", needs: () => [hcp.enabled(), twilio.canText(), Boolean(B.managerPhone)], needsText: "Housecall Pro, Twilio and MANAGER_PHONE" },
-  { id: "estimateFollowUp", name: "Estimate follow-up", category: "Sales", trigger: "Estimate open 48 hours with no job", action: "Text the homeowner a follow-up", needs: () => [hcp.enabled(), twilio.canText()], needsText: "Housecall Pro and Twilio" },
-  { id: "reviewRequest", name: "Review request", category: "Reputation", trigger: "Job marked complete", action: "Text the Google review link", needs: () => [hcp.enabled(), twilio.canText(), Boolean(B.reviewUrl)], needsText: "Housecall Pro, Twilio and REVIEW_URL" },
+  { id: "autoDispatch", name: "Auto-assign nearest tech", category: "Dispatch", trigger: "Job due now with no tech assigned", action: "Assign the closest free tech and text them the job", needs: () => [true], needsText: "" },
+  { id: "estimateFollowUp", name: "Estimate follow-up", category: "Sales", trigger: "Estimate open 48 hours", action: "Text the homeowner a follow-up", needs: () => [twilio.canText()], needsText: "Twilio with a sending number" },
+  { id: "reviewRequest", name: "Review request", category: "Reputation", trigger: "Job marked done", action: "Text the Google review link", needs: () => [twilio.canText(), Boolean(B.reviewUrl)], needsText: "Twilio and REVIEW_URL" },
   { id: "budgetGuard", name: "Ad budget guard", category: "Marketing", trigger: "Campaign cost per lead above target", action: "Pause the campaign and log it", needs: () => [googleAds.enabled() || meta.enabled()], needsText: "Google Ads or Meta Ads" },
-  { id: "capacityBoost", name: "Idle-capacity boost", category: "Marketing", trigger: "3+ techs free during business hours", action: "Raise the best Google Ads search budget 20% for the day", needs: () => [googleAds.enabled(), hcp.enabled()], needsText: "Google Ads and Housecall Pro" },
+  { id: "capacityBoost", name: "Idle-capacity boost", category: "Marketing", trigger: "3+ techs free during business hours", action: "Raise the best Google Ads search budget 20% for the day", needs: () => [googleAds.enabled()], needsText: "Google Ads" },
 ];
 
 const enabled = (id) => {
@@ -97,16 +97,31 @@ async function afterHours() {
 
 async function autoDispatch(snapshot) {
   if (!enabled("autoDispatch")) return;
-  const free = snapshot.techs.filter((t) => t.status === "available" && Number.isFinite(t.lat));
-  for (const job of raw.jobs.values()) {
-    if (job.techIds.length || job.completedAt || /cancel/.test(job.workStatus) || !(job.createdAt > Date.now() - 2 * 3600000)) continue;
-    if (!Number.isFinite(job.lat) || !free.length) continue;
+  let free = snapshot.techs.filter((t) => t.status === "available");
+  const soon = Date.now() + 2 * 3600000;
+  const waiting = [...raw.jobs.values()]
+    .filter((j) => !j.techIds.length && !j.completedAt && !/cancel/.test(j.workStatus) && j.kind !== "estimate")
+    .filter((j) => (j.scheduledStart ? j.scheduledStart <= soon : j.createdAt > Date.now() - 24 * 3600000))
+    .sort((a, b) => (b.priority === "emergency") - (a.priority === "emergency") || a.createdAt - b.createdAt);
+  for (const job of waiting) {
+    if (!free.length) return;
     const trade = job.reason ? job.reason.trade : "HVAC";
-    const pool = free.filter((t) => t.trade === trade).length ? free.filter((t) => t.trade === trade) : free;
-    const best = pool.map((t) => ({ t, d: km(t, job) })).sort((a, b) => a.d - b.d)[0];
+    const pool = free.some((t) => t.trade === trade) ? free.filter((t) => t.trade === trade) : free;
+    const located = Number.isFinite(job.lat) && pool.filter((t) => Number.isFinite(t.lat));
+    const best = located && located.length
+      ? located.map((t) => ({ t, d: km(t, job) })).sort((a, b) => a.d - b.d)[0]
+      : { t: pool[0], d: null };
     if (!once("dispatch", job.id)) continue;
-    const msg = `New job for ${job.customer}, ${job.address}. Closest free tech: ${best.t.name} (${best.d.toFixed(1)} km).`;
-    await act("autoDispatch", `Suggested ${best.t.name} for ${job.customer} · ${best.d.toFixed(1)} km away`, () => twilio.sendSms(B.managerPhone, msg));
+    free = free.filter((t) => t !== best.t);
+    const tech = raw.employees.find((e) => e.id === best.t.id);
+    const far = best.d === null ? "" : ` · ${best.d.toFixed(1)} km away`;
+    await act("autoDispatch", `Assigned ${best.t.name} to ${job.customer}${far}`, async () => {
+      jobBoard.updateJob(job.id, { action: "assign", techId: best.t.id });
+      job.techIds = [best.t.id];
+      if (tech && tech.phone && twilio.canText()) {
+        await twilio.sendSms(tech.phone, `New ${job.priority === "emergency" ? "EMERGENCY " : ""}job: ${job.customer}, ${job.address || "no address"}. ${job.reason ? job.reason.label : ""}${job.customerPhone ? ". Customer: " + job.customerPhone : ""}`);
+      }
+    });
   }
 }
 

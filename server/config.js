@@ -40,8 +40,12 @@ function parseJson(v, fallback) {
 
 module.exports = {
   port: numOr(env.PORT, 8080),
-  dashboardUser: env.DASHBOARD_USER || "admin",
-  dashboardPassword: env.DASHBOARD_PASSWORD || "",
+  // 0.0.0.0 lets phones and laptops on the same network open it too.
+  host: env.HOST || "0.0.0.0",
+  // Optional: only this email may create the first (owner) account from
+  // another device. Without it, the owner account must be created on the
+  // PC running the dashboard.
+  ownerEmail: (env.OWNER_EMAIL || "").trim().toLowerCase(),
   // Nothing is texted, paused or changed unless this is "true".
   automationsLive: env.AUTOMATIONS_LIVE === "true",
   dataDir: env.DATA_DIR || path.join(__dirname, "..", "data"),
@@ -69,11 +73,9 @@ module.exports = {
     callToDispatchMinutes: numOr(env.TARGET_DISPATCH_MINUTES, 10),
   },
 
-  housecall: {
-    apiKey: env.HOUSECALL_API_KEY || "",
-    // Optional map of employee id -> "HVAC" | "Plumbing".
-    trades: parseJson(env.HOUSECALL_TECH_TRADES, {}),
-  },
+  // Where call numbers come from: "twilio", "ooma" (CSV imports) or "both".
+  // "auto" uses Twilio when it is configured, otherwise Ooma imports.
+  callSource: (env.CALL_SOURCE || "auto").toLowerCase(),
 
   twilio: {
     accountSid: env.TWILIO_ACCOUNT_SID || "",
@@ -86,6 +88,9 @@ module.exports = {
   },
 
   google: {
+    // Browser/server key with the Geocoding API enabled, for job addresses on the map.
+    mapsApiKey: env.GOOGLE_MAPS_API_KEY || "",
+    mapsRegion: env.GOOGLE_MAPS_REGION || "us",
     clientId: env.GOOGLE_CLIENT_ID || "",
     clientSecret: env.GOOGLE_CLIENT_SECRET || "",
     refreshToken: env.GOOGLE_REFRESH_TOKEN || "",

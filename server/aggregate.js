@@ -113,14 +113,18 @@ function build() {
 
   // ---------- techs & positions ----------
   const todayStart = daysAgo(0).getTime();
-  const todaysJobs = jobs.filter((j) => (j.scheduledStart >= todayStart && j.scheduledStart < todayStart + 86400000) || j.createdAt >= todayStart || j.completedAt >= todayStart);
-  const workedIds = new Set(jobs.flatMap((j) => j.techIds));
-  const staff = raw.employees.filter((e) => workedIds.has(e.id));
-  const gpsByTech = new Map(raw.gps.filter((g) => g.techId).map((g) => [g.techId, g]));
-  const gpsByName = new Map(raw.gps.map((g) => [String(g.vehicle).toLowerCase(), g]));
+  const tomorrowStart = todayStart + 86400000;
+  // Today's board: scheduled or created today, finished today, or still in progress / waiting.
+  const todaysJobs = jobs.filter((j) => (j.scheduledStart >= todayStart && j.scheduledStart < tomorrowStart) || j.createdAt >= todayStart || j.completedAt >= todayStart ||
+    (!j.completedAt && (j.onMyWayAt || j.startedAt || (!j.scheduledStart && j.kind !== "estimate" && j.createdAt >= todayStart - 7 * 86400000))));
+  const staff = raw.employees;
+  // Truck GPS wins over the last location a tech's phone shared.
+  const allGps = [...raw.phoneGps, ...raw.gps];
+  const gpsByTech = new Map(allGps.filter((g) => g.techId).map((g) => [g.techId, g]));
+  const gpsByName = new Map(allGps.map((g) => [String(g.vehicle).toLowerCase(), g]));
   const hq = config.business.zones[0] || null;
 
-  const points = [...config.business.zones, ...todaysJobs, ...raw.gps];
+  const points = [...config.business.zones, ...todaysJobs, ...allGps];
   const project = makeProjection(points);
 
   const techs = staff.map((e) => {
@@ -134,12 +138,11 @@ function build() {
     const p = loc ? project(loc.lat, loc.lng) : { x: 50, y: 30 };
     const history = jobs.filter((j) => j.techIds.includes(e.id) && j.scheduledStart && j.startedAt);
     const onTime = history.length ? history.filter((j) => j.startedAt <= j.scheduledStart + 15 * 60000).length / history.length : null;
-    const trades = jobs.filter((j) => j.techIds.includes(e.id)).map((j) => j.reason.trade);
-    const trade = config.housecall.trades[e.id] || (trades.filter((t) => t === "Plumbing").length > trades.length / 2 ? "Plumbing" : "HVAC");
+    const trade = e.trade || "HVAC";
     const completedToday = mine.filter((j) => j.completedAt >= todayStart);
     return {
       id: e.id, name: e.name, initials: initials(e.name), title: e.role || trade, trade,
-      truck: gps ? gps.vehicle : "",
+      truck: gps && raw.gps.includes(gps) ? gps.vehicle : "",
       x: p.x, y: p.y, lat: loc && loc.lat, lng: loc && loc.lng, hasGps: Boolean(gps),
       status: onsite ? "onsite" : enroute ? "enroute" : "available",
       jobId: (onsite || enroute || {}).id || null,
@@ -159,7 +162,8 @@ function build() {
     return {
       id: j.id, customer: j.customer, address: j.address, zone: hasLoc(j) ? nearestZone(j) : "",
       x: p.x, y: p.y, reason: j.reason.id, reasonLabel: j.reason.label, trade: j.reason.trade,
-      priority: isEmergency(j.text) ? "emergency" : "standard",
+      priority: j.priority || (isEmergency(j.text) ? "emergency" : "standard"),
+      kind: j.kind || "service",
       value: j.total, status, techId: tech ? tech.id : null, eta,
       scheduledStart: j.scheduledStart, createdAt: j.createdAt,
     };
@@ -192,6 +196,7 @@ function build() {
 
   return {
     source: "api",
+    outboundTracked: calls.some((c) => !c.inbound),
     live: config.automationsLive,
     generatedAt: Date.now(),
     days: dates.map((d) => days.get(d)),

@@ -1,0 +1,11 @@
+{
+  "name": "Service Operations",
+  "short_name": "Ops",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#eef2f1",
+  "theme_color": "#0d2a2c",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

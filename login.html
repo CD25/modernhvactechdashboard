@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>Sign in · Service Operations</title>
+    <meta name="theme-color" content="#0d2a2c" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/css/styles.css" />
+    <style>
+      body { min-height: 100%; }
+      .auth { min-height: 100vh; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+      .auth-side {
+        background: linear-gradient(180deg, var(--side) 0%, var(--side-2) 100%); color: var(--side-text);
+        padding: 48px; display: flex; flex-direction: column; justify-content: space-between; gap: 32px;
+      }
+      .auth-side h1 { color: #fff; font-size: 34px; font-weight: 800; letter-spacing: -0.03em; line-height: 1.1; max-width: 420px; text-wrap: balance; }
+      .auth-side p { color: var(--side-muted); max-width: 420px; margin-top: 12px; }
+      .auth-side ul { list-style: none; display: grid; gap: 10px; font-size: 13px; }
+      .auth-side li { display: flex; gap: 10px; align-items: center; }
+      .auth-side li::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex: none; }
+      .auth-main { display: grid; place-items: center; padding: 32px 16px; }
+      .auth-card { width: min(400px, 100%); }
+      .tabs { display: grid; grid-template-columns: 1fr 1fr; padding: 3px; border-radius: 10px; background: var(--surface); border: 1px solid var(--border); margin-bottom: 22px; }
+      .tabs button { border: 0; background: none; padding: 9px; border-radius: 7px; font-weight: 600; color: var(--text-2); }
+      .tabs button[aria-selected="true"] { background: var(--selected); color: #fff; }
+      .auth-card h2 { font-size: 22px; font-weight: 800; letter-spacing: -0.02em; }
+      .auth-card .sub { color: var(--text-2); margin: 4px 0 20px; font-size: 13px; }
+      form { display: grid; gap: 14px; }
+      label { display: grid; gap: 6px; font-size: 12.5px; font-weight: 600; color: var(--text-2); }
+      input {
+        font: inherit; font-size: 15px; padding: 11px 12px; border-radius: 10px; border: 1px solid var(--axis);
+        background: var(--surface); color: var(--text); width: 100%;
+      }
+      input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-color: transparent; }
+      .primary { border: 0; background: var(--accent); color: #fff; font-weight: 700; padding: 12px; border-radius: 10px; font-size: 15px; margin-top: 4px; }
+      .primary:disabled { opacity: 0.6; cursor: default; }
+      .msg { padding: 10px 12px; border-radius: 10px; font-size: 13px; }
+      .msg.error { background: color-mix(in srgb, var(--critical) 12%, transparent); color: var(--critical); }
+      .msg.ok { background: color-mix(in srgb, var(--good) 12%, transparent); color: var(--good-ink); }
+      .hint { font-size: 12px; color: var(--muted); }
+      @media (max-width: 800px) {
+        .auth { grid-template-columns: 1fr; }
+        .auth-side { padding: 28px 20px; }
+        .auth-side h1 { font-size: 24px; }
+        .auth-side ul { display: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="auth">
+      <aside class="auth-side">
+        <div class="brand" style="padding:0">
+          <span class="logo" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 11 12 4l9 7v9H3z"/><path d="M9 20v-6h6v6"/></svg></span>
+          <div><b id="biz">Service Operations</b><small class="mono">OPERATIONS COCKPIT</small></div>
+        </div>
+        <div>
+          <h1>Calls, jobs and trucks in one place.</h1>
+          <p>Sign in to see today's calls, the job board, live dispatch, your Google and ad numbers, and what the automations have done.</p>
+        </div>
+        <ul>
+          <li>Works on phone, tablet and computer</li>
+          <li>New accounts need the owner's approval</li>
+          <li>Stay signed in for 30 days on your device</li>
+        </ul>
+      </aside>
+
+      <main class="auth-main">
+        <div class="auth-card">
+          <div class="tabs" role="tablist">
+            <button role="tab" id="tab-in" aria-selected="true">Sign in</button>
+            <button role="tab" id="tab-up" aria-selected="false">Create account</button>
+          </div>
+
+          <section id="pane-in">
+            <h2>Welcome back</h2>
+            <p class="sub">Sign in with your email and password.</p>
+            <form id="form-in" novalidate>
+              <label>Email<input id="in-email" type="email" autocomplete="email" required /></label>
+              <label>Password<input id="in-pass" type="password" autocomplete="current-password" required /></label>
+              <div id="in-msg" class="msg" hidden></div>
+              <button class="primary" type="submit">Sign in</button>
+              <p class="hint">Forgot your password? Ask the owner to reset it from the Team page.</p>
+            </form>
+          </section>
+
+          <section id="pane-up" hidden>
+            <h2 id="up-title">Create an account</h2>
+            <p class="sub" id="up-sub">The owner approves new accounts before they can see the dashboard.</p>
+            <form id="form-up" novalidate>
+              <label>Your name<input id="up-name" type="text" autocomplete="name" required /></label>
+              <label>Email<input id="up-email" type="email" autocomplete="email" required /></label>
+              <label>Password<input id="up-pass" type="password" autocomplete="new-password" minlength="8" required /></label>
+              <label>Confirm password<input id="up-pass2" type="password" autocomplete="new-password" minlength="8" required /></label>
+              <p class="hint">At least 8 characters.</p>
+              <div id="up-msg" class="msg" hidden></div>
+              <button class="primary" type="submit" id="up-btn">Create account</button>
+            </form>
+          </section>
+        </div>
+      </main>
+    </div>
+
+    <script>
+      (function () {
+        const $ = (id) => document.getElementById(id);
+        function show(tab) {
+          const up = tab === "up";
+          $("tab-in").setAttribute("aria-selected", String(!up));
+          $("tab-up").setAttribute("aria-selected", String(up));
+          $("pane-in").hidden = up;
+          $("pane-up").hidden = !up;
+          (up ? $("up-name") : $("in-email")).focus();
+        }
+        $("tab-in").onclick = () => show("in");
+        $("tab-up").onclick = () => show("up");
+
+        function message(id, text, kind) {
+          const el = $(id);
+          el.textContent = text;
+          el.className = "msg " + kind;
+          el.hidden = !text;
+        }
+
+        async function post(url, body) {
+          const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), credentials: "same-origin" });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data.error || "Something went wrong. Try again.");
+          return data;
+        }
+
+        fetch("/api/auth/status").then((r) => r.json()).then((s) => {
+          if (s.business) { $("biz").textContent = s.business; document.title = "Sign in · " + s.business; }
+          if (!s.hasUsers) {
+            $("up-title").textContent = "Create the owner account";
+            $("up-sub").textContent = s.canCreateOwner
+              ? "This is the first account, so it becomes the owner. The owner approves everyone else."
+              : "The owner account hasn't been created yet. Create it on the PC that runs the dashboard.";
+            show("up");
+          }
+        }).catch(() => {});
+
+        $("form-in").addEventListener("submit", async (e) => {
+          e.preventDefault();
+          const btn = e.submitter || e.target.querySelector("button");
+          btn.disabled = true;
+          message("in-msg", "", "");
+          try {
+            await post("/api/auth/login", { email: $("in-email").value, password: $("in-pass").value });
+            location.href = "/";
+          } catch (err) {
+            message("in-msg", err.message, "error");
+          } finally {
+            btn.disabled = false;
+          }
+        });
+
+        $("form-up").addEventListener("submit", async (e) => {
+          e.preventDefault();
+          if ($("up-pass").value !== $("up-pass2").value) return message("up-msg", "The two passwords don't match.", "error");
+          $("up-btn").disabled = true;
+          message("up-msg", "", "");
+          try {
+            const r = await post("/api/auth/signup", { name: $("up-name").value, email: $("up-email").value, password: $("up-pass").value });
+            if (r.pending) {
+              message("up-msg", "Account created. The owner needs to approve it before you can sign in.", "ok");
+              e.target.reset();
+            } else {
+              location.href = "/";
+            }
+          } catch (err) {
+            message("up-msg", err.message, "error");
+          } finally {
+            $("up-btn").disabled = false;
+          }
+        });
+      })();
+    </script>
+  </body>
+</html>
