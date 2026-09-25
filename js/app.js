@@ -491,7 +491,7 @@
 
   function renderChrome() {
     const v = VIEWS.find((x) => x.id === ui.view);
-    $("#crumb").innerHTML = `<span class="mono">${esc(cfg.company.name.split(" ")[0].toUpperCase())}</span> / <b>${v.crumb}</b>`;
+    $("#crumb").innerHTML = `<span class="mono">${esc(cfg.company.name.toUpperCase())}</span> / <b>${v.crumb}</b>`;
     const secs = Math.round((Date.now() - S.lastSync) / 1000);
     $("#sync").innerHTML = `<i class="pulse ${ui.paused ? "off" : ""}"></i>${ui.paused ? "Paused" : "Live"} · ${isLive() ? (S.live ? "Live data · automations on" : "Live data · automations dry run") : "Simulated feed"} · synced ${secs}s ago`;
     $("#pause").innerHTML = icon(ui.paused ? "play" : "pause");
@@ -551,7 +551,7 @@
     if (e.target.closest("#menu")) { document.body.classList.toggle("nav-open"); return; }
     if (e.target.closest("#user-menu-btn")) { $("#user-menu").hidden = !$("#user-menu").hidden; return; }
     if (e.target.closest("#sign-out")) {
-      fetch("/api/auth/logout", { method: "POST" }).finally(() => { location.href = "/login"; });
+      fetch("/api/auth/logout", { method: "POST" }).finally(() => { location.replace("/login"); });
       return;
     }
     if (e.target.closest("#change-password")) { $("#user-menu").hidden = true; location.hash = "team"; setTimeout(() => { const f = $("#pw-current"); if (f) f.focus(); }, 50); return; }

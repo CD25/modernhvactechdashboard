@@ -11,9 +11,9 @@
  */
 window.HVAC_CONFIG = {
   company: {
-    name: "Northline Home",
+    name: "Modern HVAC Tech",
     tagline: "Service Operations",
-    region: "Oakview service region",
+    region: "Service region",
     manager: { name: "Jordan Reed", role: "Ops manager" },
   },
 

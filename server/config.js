@@ -51,7 +51,7 @@ module.exports = {
   dataDir: env.DATA_DIR || path.join(__dirname, "..", "data"),
 
   business: {
-    name: env.BUSINESS_NAME || "Northline Home",
+    name: env.BUSINESS_NAME || "Modern HVAC Tech",
     tagline: env.BUSINESS_TAGLINE || "Service Operations",
     region: env.BUSINESS_REGION || "Service region",
     manager: env.MANAGER_NAME || "Ops manager",
