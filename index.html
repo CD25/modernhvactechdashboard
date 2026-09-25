@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Service Operations Cockpit</title>
+    <meta name="description" content="Automated operations dashboard for HVAC and plumbing service companies." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="css/styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <aside class="sidebar" aria-label="Main navigation">
+        <div class="brand">
+          <span class="logo" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M3 11 12 4l9 7v9H3z"/><path d="M9 20v-6h6v6"/></svg>
+          </span>
+          <div><b id="brand-name"></b><small id="brand-tag" class="mono"></small></div>
+        </div>
+        <p class="nav-title mono">OPERATIONS COCKPIT</p>
+        <nav id="nav"></nav>
+        <div class="side-foot">
+          <p><i class="pulse"></i><span id="foot-status">Dispatch online</span></p>
+          <p class="mono" id="foot-time"></p>
+        </div>
+      </aside>
+
+      <div class="main">
+        <header class="topbar">
+          <button id="menu" class="icon-btn only-sm" aria-label="Open navigation">
+            <svg class="ico" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+          </button>
+          <div id="crumb" class="crumb"></div>
+          <div class="top-actions">
+            <span id="sync" class="sync mono"></span>
+            <button id="pause" class="icon-btn" aria-label="Pause live updates"></button>
+            <button id="bell" class="icon-btn" aria-label="Automation activity">
+              <svg class="ico" viewBox="0 0 24 24"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10 21a2 2 0 0 0 4 0"/></svg>
+              <span id="bell-count" class="badge" hidden></span>
+            </button>
+            <div class="user">
+              <span id="avatar" class="avatar"></span>
+              <div class="hide-sm"><b id="user-name"></b><small id="user-role" class="mono"></small></div>
+            </div>
+          </div>
+        </header>
+        <main id="view" class="view" tabindex="-1"></main>
+      </div>
+    </div>
+
+    <aside id="feed-panel" class="feed" aria-label="Automation activity">
+      <header><h3>Automation activity</h3><p class="mono muted">Everything the system did on its own</p></header>
+      <div id="feed"></div>
+    </aside>
+
+    <script src="js/config.js"></script>
+    <script src="js/engine.js"></script>
+    <script src="js/charts.js"></script>
+    <script src="js/app.js"></script>
+  </body>
+</html>
