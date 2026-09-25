@@ -35,6 +35,7 @@ const PRIVATE = new Map([
   ["/js/charts.js", "js/charts.js"],
   ["/js/app.js", "js/app.js"],
   ["/js/board.js", "js/board.js"],
+  ["/js/marketing.js", "js/marketing.js"],
 ]);
 const TYPES = {
   ".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8", ".js": "text/javascript; charset=utf-8",
@@ -149,6 +150,7 @@ function browserConfig(user) {
     user: auth.publicUser(user),
     dataSource: "api",
     jobSource: collector.jobSource(),
+    hiddenPages: collector.hiddenPages(),
     refreshMs: 10000,
     api: { baseUrl: "", snapshotPath: "/api/dashboard/snapshot", rulesPath: "/api/automations", headers: {} },
     targets: config.targets,

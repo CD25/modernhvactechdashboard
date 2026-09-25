@@ -53,6 +53,26 @@ function nearestZone(p) {
 const initials = (name) => name.split(/\s+/).map((s) => s[0] || "").join("").slice(0, 2).toUpperCase();
 const hasLoc = (o) => Boolean(o) && Number.isFinite(o.lat) && Number.isFinite(o.lng);
 
+// Google Analytics, Google Ads and Search Console, shaped for the SEO and Campaigns pages.
+function marketing(campaigns) {
+  const meta = new Map(campaigns.map((c) => [c.id, c]));
+  const adsCampaigns = raw.ads.periods ? Object.fromEntries(Object.entries(raw.ads.periods).map(([key, byId]) => {
+    // Today comes from the 5-minute poll, which is fresher than the 30-minute history.
+    const rows = key === "today"
+      ? campaigns.filter((c) => c.platform === "googleAds").map((c) => [c.id, { cost: c.spendToday, conversions: c.leadsToday, ...(byId[c.id] ? { clicks: byId[c.id].clicks, impressions: byId[c.id].impressions } : { clicks: 0, impressions: 0 }) }])
+      : Object.entries(byId);
+    return [key, rows.map(([id, t]) => {
+      const c = meta.get(id) || {};
+      return { id, name: c.name || id, channel: c.channel || "Google Ads", type: c.type || "", status: c.status || "", dailyBudget: c.dailyBudget || 0, ...t };
+    }).sort((a, b) => b.cost - a.cost)];
+  })) : null;
+  return {
+    ga4: { periods: raw.ga4.periods, pages: raw.ga4.pages, realtime: raw.ga4.realtime },
+    ads: { daily: raw.ads.daily, campaigns: adsCampaigns, terms: raw.ads.terms },
+    gsc: raw.gsc,
+  };
+}
+
 function build() {
   const dates = lastDates(30);
   const days = new Map(dates.map((d) => [d, emptyDay(d)]));
@@ -220,6 +240,7 @@ function build() {
       requestsToday: runsToday("reviewRequest"),
       mapViews: raw.gbpPerf ? raw.gbpPerf.mapViews : null,
     },
+    marketing: marketing(campaigns),
     backlinks: null,
     newBacklinks: null,
     rules,

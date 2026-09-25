@@ -66,6 +66,52 @@ On a Mac, use `start-dashboard.sh` and `share-link.sh` instead.
 - On a phone, open the link and choose **Add to Home Screen** to use it
   like an app.
 
+## Starting with just Google
+
+The dashboard runs fine with only Google Analytics, Google Ads and Search
+Console connected. Pages with nothing behind them (Calls, Dispatch) stay out
+of the menu until Housecall Pro or Twilio is added.
+
+What you get:
+
+- **Local SEO & Web Traffic:** website visitors and quote requests with the
+  change from the previous period, visits by source, people on the site right
+  now, top landing pages and how often each one produces a quote, clicks and
+  average position from Google search, the searches people used to find the
+  site (with position changes), tracked keywords, and top pages in search.
+- **Local Campaigns & LSAs:** spend, leads (conversions), cost per lead and
+  clicks for today, 7 or 30 days; spend and leads per day; every campaign with
+  its cost per lead; the exact searches that triggered the ads; and the spend
+  that produced no leads (candidates for negative keywords).
+- **AI Operations:** insights from the same data: wasted search terms, the
+  best-converting landing page, keywords that climbed, traffic swings.
+- The **Ad budget guard** can pause a campaign whose cost per lead today runs
+  over `TARGET_MAX_CPL` (dry run until `AUTOMATIONS_LIVE=true`).
+
+Minimum `.env` for this:
+
+```
+TZ=America/Chicago
+GOOGLE_CLIENT_ID=...
+GOOGLE_CLIENT_SECRET=...
+GOOGLE_REFRESH_TOKEN=...        # from npm run google-auth
+GOOGLE_ADS_DEVELOPER_TOKEN=...
+GOOGLE_ADS_CUSTOMER_ID=...
+GA4_PROPERTY_ID=...
+GA4_QUOTE_EVENT=generate_lead   # or whatever the quote form fires
+GSC_SITE_URL=sc-domain:yourdomain.com
+GSC_KEYWORDS=ac repair near me,furnace repair,...
+```
+
+Then run `npm run check`. It prints last week's visitors, ad spend, top
+search terms and top Google searches, so you can compare them with what you
+see in each Google product before opening the dashboard.
+
+How fresh the numbers are: Analytics "on the site now" updates every minute,
+ad spend and leads every 5 minutes, everything else every 30 minutes. Google
+Ads conversions can arrive a few hours late, and Search Console's last two
+days are preliminary.
+
 ## Setup, one service at a time
 
 Fill in `.env`. You can start with Housecall Pro and Twilio and add the

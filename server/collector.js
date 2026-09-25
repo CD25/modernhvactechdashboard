@@ -21,7 +21,7 @@ const { daysAgo } = require("./time");
 
 const CONNECTORS = [
   { id: "housecall", name: "Housecall Pro", mod: hcp, feeds: "Jobs, techs, estimates, revenue, on-my-way" },
-  { id: "jobs", name: "Built-in job board", mod: { enabled: () => !hcp.enabled() }, feeds: "Jobs and techs (used when Housecall Pro isn't connected)" },
+  { id: "jobs", name: "Built-in job board", mod: { enabled: () => !hcp.enabled() && config.jobBoard }, feeds: "Jobs and techs (used when Housecall Pro isn't connected)" },
   { id: "twilio", name: "Twilio", mod: twilio, feeds: "Calls and text messages" },
   { id: "ooma", name: "Ooma call logs", mod: { enabled: () => useOoma() }, feeds: "Calls from Ooma CSV imports" },
   { id: "googleAds", name: "Google Ads & LSA", mod: googleAds, feeds: "Ad spend, leads, LSA" },
@@ -55,6 +55,9 @@ const raw = {
   reviews: null,
   gbpPerf: null,
   keywords: [],
+  ga4: { periods: null, pages: null, realtime: null },
+  ads: { daily: [], periods: null, terms: null },
+  gsc: { daily: [], queries: null, pages: [] },
   gps: [],
   phoneGps: [],
   status: Object.fromEntries(CONNECTORS.map((c) => [c.id, { ok: null, error: null, lastSync: null }])),
@@ -82,7 +85,7 @@ function trim() {
 // Job board and Ooma imports live on this machine, so they reload instantly.
 // With Housecall Pro connected, jobs and techs come from there instead.
 function local() {
-  if (!hcp.enabled()) {
+  if (!hcp.enabled() && config.jobBoard) {
     raw.jobs = new Map(jobBoard.normalized().map((j) => [j.id, j]));
     raw.employees = jobBoard.employees();
     raw.estimates = jobBoard.estimates();
@@ -111,6 +114,7 @@ async function fast() {
       for (const c of await twilio.callsSince(daysAgo(1))) raw.calls.set(c.sid, c);
     }),
     run("samsara", async () => { raw.gps = await samsara.vehicleLocations(); }),
+    run("ga4", async () => { raw.ga4.realtime = await ga4.realtime(); }),
   ]);
   local();
   trim();
@@ -120,6 +124,7 @@ async function fast() {
 async function medium() {
   await Promise.all([
     run("googleAds", async () => { raw.adsCampaigns = await googleAds.campaignsToday(); }),
+    run("ga4", async () => { raw.ga4.periods = await ga4.periods(); }),
     run("meta", async () => { raw.metaCampaigns = await meta.campaignsToday(); }),
     run("housecall", async () => { raw.estimates = await hcp.estimatesSince(daysAgo(30).getTime()); }),
   ]);
@@ -138,17 +143,38 @@ async function slow() {
       const worked = new Set(jobs.flatMap((j) => j.techIds));
       raw.employees = emps.filter((e) => worked.has(e.id)).map((e) => ({ ...e, trade: config.housecall.trades[e.id] || e.trade }));
     }),
-    run("googleAds", async () => { raw.lsa = await googleAds.lsaHistory(30); }),
-    run("ga4", async () => { raw.web = await ga4.daily(30); }),
+    run("googleAds", async () => {
+      const [lsa, daily, periods, terms] = await Promise.all([googleAds.lsaHistory(30), googleAds.accountDaily(60), googleAds.campaignPeriods(), googleAds.searchTerms()]);
+      raw.lsa = lsa;
+      raw.ads = { daily, periods, terms };
+    }),
+    run("ga4", async () => {
+      const [web, pages] = await Promise.all([ga4.daily(30), ga4.landingPages()]);
+      raw.web = web;
+      raw.ga4.pages = pages;
+    }),
     run("gbp", async () => {
       const [r, p] = await Promise.all([gbp.reviews(), gbp.performance(30)]);
       raw.reviews = r; raw.gbpPerf = p;
     }),
-    run("gsc", async () => { raw.keywords = await gsc.keywords(); }),
+    run("gsc", async () => {
+      const r = await gsc.all();
+      raw.keywords = r.keywords;
+      raw.gsc = { daily: r.daily, queries: r.queries, pages: r.pages };
+    }),
   ]);
   trim();
 }
 
-const jobSource = () => (hcp.enabled() ? "housecall" : "board");
+const jobSource = () => (hcp.enabled() ? "housecall" : config.jobBoard ? "board" : "none");
 
-module.exports = { raw, CONNECTORS, fast, medium, slow, local, jobSource };
+// Pages with nothing connected behind them stay out of the menu.
+function hiddenPages() {
+  const hidden = [];
+  const calls = useTwilioCalls() || config.callSource === "ooma" || config.callSource === "both" || ooma.calls().length > 0;
+  if (!calls && jobSource() === "none") hidden.push("calls");
+  if (jobSource() === "none" && !samsara.enabled()) hidden.push("dispatch");
+  return hidden;
+}
+
+module.exports = { raw, CONNECTORS, fast, medium, slow, local, jobSource, hiddenPages };

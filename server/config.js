@@ -73,6 +73,9 @@ module.exports = {
     callToDispatchMinutes: numOr(env.TARGET_DISPATCH_MINUTES, 10),
   },
 
+  // Built-in job board for shops without Housecall Pro.
+  jobBoard: env.JOB_BOARD === "true",
+
   housecall: {
     apiKey: env.HOUSECALL_API_KEY || "",
     // Optional map of employee id -> "HVAC" | "Plumbing".

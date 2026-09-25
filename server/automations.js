@@ -26,11 +26,11 @@ const RULES = [
   { id: "afterHours", name: "After-hours callback", category: "Calls", trigger: "Call missed after hours", action: "Text the caller, queue a morning callback", needs: () => [twilio.canText()], needsText: "Twilio with a sending number" },
   hcp.enabled()
     ? { id: "autoDispatch", name: "Nearest-tech suggestion", category: "Dispatch", trigger: "Job in Housecall Pro with no tech assigned", action: "Text the dispatcher the closest free tech", needs: () => [twilio.canText(), Boolean(B.managerPhone)], needsText: "Twilio and MANAGER_PHONE" }
-    : { id: "autoDispatch", name: "Auto-assign nearest tech", category: "Dispatch", trigger: "Job due now with no tech assigned", action: "Assign the closest free tech and text them the job", needs: () => [true], needsText: "" },
+    : { id: "autoDispatch", name: "Auto-assign nearest tech", category: "Dispatch", trigger: "Job due now with no tech assigned", action: "Assign the closest free tech and text them the job", needs: () => [config.jobBoard], needsText: "Housecall Pro (or JOB_BOARD=true)" },
   { id: "estimateFollowUp", name: "Estimate follow-up", category: "Sales", trigger: "Estimate open 48 hours", action: "Text the homeowner a follow-up", needs: () => [twilio.canText()], needsText: "Twilio with a sending number" },
   { id: "reviewRequest", name: "Review request", category: "Reputation", trigger: "Job marked done", action: "Text the Google review link", needs: () => [twilio.canText(), Boolean(B.reviewUrl)], needsText: "Twilio and REVIEW_URL" },
   { id: "budgetGuard", name: "Ad budget guard", category: "Marketing", trigger: "Campaign cost per lead above target", action: "Pause the campaign and log it", needs: () => [googleAds.enabled() || meta.enabled()], needsText: "Google Ads or Meta Ads" },
-  { id: "capacityBoost", name: "Idle-capacity boost", category: "Marketing", trigger: "3+ techs free during business hours", action: "Raise the best Google Ads search budget 20% for the day", needs: () => [googleAds.enabled()], needsText: "Google Ads" },
+  { id: "capacityBoost", name: "Idle-capacity boost", category: "Marketing", trigger: "3+ techs free during business hours", action: "Raise the best Google Ads search budget 20% for the day", needs: () => [googleAds.enabled(), hcp.enabled() || config.jobBoard], needsText: "Google Ads and Housecall Pro" },
 ];
 
 const enabled = (id) => {

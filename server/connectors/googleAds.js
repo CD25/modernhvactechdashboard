@@ -57,6 +57,7 @@ async function campaignsToday() {
       platform: "googleAds",
       name: r.campaign.name,
       channel: lsa ? "Local Services Ads" : "Google Ads",
+      type: String(r.campaign.advertisingChannelType || "").replace(/_/g, " ").toLowerCase(),
       status: r.campaign.status === "ENABLED" ? "active" : "paused",
       budgetResource: r.campaignBudget && r.campaignBudget.resourceName,
       dailyBudget: micros(r.campaignBudget && r.campaignBudget.amountMicros),
@@ -98,6 +99,66 @@ async function lsaHistory(days = 30) {
   return out;
 }
 
+const periodStart = { today: 0, "7d": 6, "30d": 29 };
+const between = (from, to) => `segments.date BETWEEN '${localDate(daysAgo(from))}' AND '${localDate(daysAgo(to))}'`;
+
+// Whole-account totals per day for the last 60 days (enough for "vs previous 30 days").
+async function accountDaily(days = 60) {
+  const rows = await search(`
+    SELECT segments.date, metrics.cost_micros, metrics.clicks, metrics.impressions, metrics.conversions
+    FROM customer WHERE ${between(days - 1, 0)}`);
+  return rows.map((r) => ({
+    date: r.segments.date,
+    cost: micros(r.metrics.costMicros),
+    clicks: Number(r.metrics.clicks || 0),
+    impressions: Number(r.metrics.impressions || 0),
+    conversions: Number(r.metrics.conversions || 0),
+  })).sort((a, b) => a.date.localeCompare(b.date));
+}
+
+// Each campaign's results for today, 7 and 30 days.
+async function campaignPeriods() {
+  const rows = await search(`
+    SELECT campaign.id, segments.date, metrics.cost_micros, metrics.clicks, metrics.impressions, metrics.conversions
+    FROM campaign WHERE ${between(29, 0)} AND campaign.status != 'REMOVED'`);
+  const out = { today: {}, "7d": {}, "30d": {} };
+  for (const r of rows) {
+    const id = `gads-${r.campaign.id}`;
+    const age = Math.round((daysAgo(0) - new Date(r.segments.date + "T00:00:00")) / 86400000);
+    for (const [key, maxAge] of Object.entries(periodStart)) {
+      if (age > maxAge) continue;
+      const t = (out[key][id] = out[key][id] || { cost: 0, clicks: 0, impressions: 0, conversions: 0 });
+      t.cost += micros(r.metrics.costMicros);
+      t.clicks += Number(r.metrics.clicks || 0);
+      t.impressions += Number(r.metrics.impressions || 0);
+      t.conversions += Number(r.metrics.conversions || 0);
+    }
+  }
+  return out;
+}
+
+// What people actually typed before clicking an ad, for 7 and 30 days.
+async function searchTerms() {
+  const out = {};
+  for (const [key, from] of [["7d", 6], ["30d", 29]]) {
+    const rows = await search(`
+      SELECT search_term_view.search_term, metrics.clicks, metrics.impressions, metrics.cost_micros, metrics.conversions
+      FROM search_term_view WHERE ${between(from, 0)} AND metrics.clicks > 0`);
+    const terms = new Map();
+    for (const r of rows) {
+      const term = r.searchTermView.searchTerm;
+      const t = terms.get(term) || { term, clicks: 0, impressions: 0, cost: 0, conversions: 0 };
+      t.clicks += Number(r.metrics.clicks || 0);
+      t.impressions += Number(r.metrics.impressions || 0);
+      t.cost += micros(r.metrics.costMicros);
+      t.conversions += Number(r.metrics.conversions || 0);
+      terms.set(term, t);
+    }
+    out[key] = [...terms.values()].sort((a, b) => b.cost - a.cost).slice(0, 40);
+  }
+  return out;
+}
+
 async function setCampaignStatus(campaignId, status) {
   return request("Google Ads", `${base()}/campaigns:mutate`, {
     method: "POST",
@@ -114,4 +175,4 @@ async function setBudget(budgetResource, dollars) {
   });
 }
 
-module.exports = { enabled, campaignsToday, lsaHistory, setCampaignStatus, setBudget, search };
+module.exports = { enabled, campaignsToday, lsaHistory, accountDaily, campaignPeriods, searchTerms, setCampaignStatus, setBudget, search };

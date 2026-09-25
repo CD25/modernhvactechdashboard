@@ -31,17 +31,17 @@ const checks = [
     return { callsSinceYesterday: calls.length, sample: calls[0] || "no calls", canText: twilio.canText() };
   }],
   ["Google Ads & LSA", googleAds, async () => {
-    const c = await googleAds.campaignsToday();
-    return { campaigns: c.length, sample: c[0] || "no campaigns" };
+    const [c, daily, terms] = await Promise.all([googleAds.campaignsToday(), googleAds.accountDaily(7), googleAds.searchTerms()]);
+    return { campaigns: c.length, sample: c[0] || "no campaigns", last7days: daily, topSearchTerms: (terms["7d"] || []).slice(0, 5) };
   }],
   ["Google Analytics", ga4, async () => {
-    const d = await ga4.daily(7);
-    return { days: Object.keys(d).length, sample: Object.entries(d)[0] || "no data" };
+    const [d, periods, rt] = await Promise.all([ga4.daily(7), ga4.periods(), ga4.realtime()]);
+    return { days: Object.keys(d).length, sampleDay: Object.entries(d)[0] || "no data", last7days: periods["7d"], onSiteNow: rt.activeUsers };
   }],
   ["Business Profile", gbp, async () => ({ reviews: await gbp.reviews(), performance30d: await gbp.performance(30) })],
   ["Search Console", gsc, async () => {
-    const k = await gsc.keywords();
-    return { keywords: k.length, sample: k.slice(0, 3) };
+    const r = await gsc.all();
+    return { days: r.daily.length, topQueries: r.queries["7d"].slice(0, 5), trackedKeywords: r.keywords };
   }],
   ["Meta Ads", meta, async () => {
     const c = await meta.campaignsToday();

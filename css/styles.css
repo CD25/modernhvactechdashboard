@@ -445,3 +445,15 @@ textarea { resize: vertical; }
   .assign { width: 100%; }
   .assign select { flex: 1; }
 }
+
+/* ---------- Google data panels ---------- */
+.rt { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; }
+.rt b { font-size: 34px; font-weight: 800; letter-spacing: -0.03em; }
+.plain-list { list-style: none; }
+.plain-list li { display: flex; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--grid); font-size: 13px; }
+.plain-list li:last-child { border-bottom: 0; }
+.plain-list li > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); }
+.plain-list li > b { white-space: nowrap; font-variant-numeric: tabular-nums; }
+td.clip { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row-warn td:first-child { color: var(--critical); }
+.row-warn td:first-child::after { content: " · no leads"; font-size: 11px; color: var(--muted); }

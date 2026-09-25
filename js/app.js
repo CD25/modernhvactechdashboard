@@ -22,7 +22,7 @@
     { id: "ai", label: "AI Operations Intelligence", sub: "Recommendations", crumb: "AI operations", icon: "spark" },
     { id: "jobs", label: "Job Board", sub: "Book & dispatch", crumb: "Job board", icon: "calendar", live: true },
     { id: "team", label: "Team & Settings", sub: "Accounts, techs, imports", crumb: "Team & settings", icon: "users", live: true },
-  ].filter((v) => (!v.live || cfg.dataSource === "api") && !(v.id === "jobs" && cfg.jobSource === "housecall"));
+  ].filter((v) => (!v.live || cfg.dataSource === "api") && !(v.id === "jobs" && cfg.jobSource !== "board") && !(cfg.hiddenPages || []).includes(v.id));
   // Pages drawn by board.js; they manage their own data and refresh.
   const BOARD_VIEWS = new Set(["jobs", "team"]);
   const me = cfg.user || null;
@@ -56,7 +56,7 @@
   const icon = (name, cls = "") => `<svg class="ico ${cls}" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name] || ""}</svg>`;
 
   const ui = {
-    view: VIEWS.some((v) => v.id === location.hash.slice(1)) ? location.hash.slice(1) : "calls",
+    view: VIEWS.some((v) => v.id === location.hash.slice(1)) ? location.hash.slice(1) : VIEWS[0].id,
     range: "7d",
     paused: false,
     seenLog: S.log.length ? S.log[0].t : 0,
@@ -111,9 +111,10 @@
   function delta(cur, prev, { invert = false, unit = "%" } = {}) {
     if (prev === null || prev === undefined || !isFinite(prev) || prev === 0) return `<span class="delta">—</span>`;
     const d = unit === "%" ? (cur - prev) / prev : cur - prev;
+    if (unit === "pos" && Math.abs(d) < 0.05) return `<span class="delta">no change</span>`;
     const good = invert ? d <= 0 : d >= 0;
     const ad = Math.abs(Math.round(d));
-    const txt = unit === "%" ? `${Math.abs(d * 100).toFixed(1)}%` : unit === "s" ? (ad >= 60 ? `${Math.floor(ad / 60)}m ${ad % 60}s` : `${ad}s`) : Math.abs(d).toFixed(1);
+    const txt = unit === "%" ? `${Math.abs(d * 100).toFixed(1)}%` : unit === "pos" ? Math.abs(d).toFixed(1) : unit === "s" ? (ad >= 60 ? `${Math.floor(ad / 60)}m ${ad % 60}s` : `${ad}s`) : Math.abs(d).toFixed(1);
     return `<span class="delta ${good ? "up" : "down"}">${icon(d >= 0 ? "arrowUp" : "arrowDown")}${txt}</span>`;
   }
 
@@ -234,7 +235,12 @@
       <span class="auto ${rule && rule.enabled ? "on" : ""}">${icon("bolt")}${rule && rule.enabled ? "Automated" : "Manual"}</span></li>`;
   }
 
+  // Live pages built from Google Analytics, Google Ads and Search Console.
+  const M = window.HVAC_MARKETING;
+  const H = () => ({ S, ui, cfg, C, $, esc, num, money, pct, icon, kpi, panel, hero, delta, empty, na, rangeLabel, isOwner });
+
   views.seo = function () {
+    if (isLive() && M && S.marketing) return M.seo(H());
     const { cur, prev, label } = windowStats();
     const inPack = S.keywords.filter((k) => k.pos && k.pos <= 3).length;
     const kws = S.keywords.slice().sort((a, b) => (a.pos || 999) - (b.pos || 999)).slice(0, 8);
@@ -272,6 +278,7 @@
   };
 
   views.campaigns = function () {
+    if (isLive() && M && S.marketing) return M.campaigns(H());
     const { cur, prev, label } = windowStats();
     const spend = S.campaigns.reduce((s, c) => s + c.spendToday, 0);
     const leads = S.campaigns.reduce((s, c) => s + c.leadsToday, 0);
@@ -381,7 +388,7 @@
     const tomorrow = new Date(); tomorrow.setDate(tomorrow.getDate() + 1);
     const sameWd = days.filter((d) => new Date(d.date + "T12:00").getDay() === tomorrow.getDay() && d !== days[days.length - 1]);
     const trend = last7.calls / Math.max(1, prev7.calls);
-    if (!last7.calls && !prev7.calls) return out.concat(isLive() ? [{ tone: "info", ic: "phone", title: "Waiting for call history", body: "Insights appear once Twilio and Housecall Pro have a few days of data.", action: "Check connections" }] : []);
+    if (!last7.calls && !prev7.calls) return out.concat(isLive() && !(cfg.hiddenPages || []).includes("calls") ? [{ tone: "info", ic: "phone", title: "Waiting for call history", body: "Insights appear once Twilio and Housecall Pro have a few days of data.", action: "Check connections" }] : []);
     const forecast = sameWd.length ? (sameWd.reduce((s, d) => s + d.calls, 0) / sameWd.length) * trend : last7.calls / 7;
     const techNeeded = Math.ceil((forecast * 0.72) / 5.5);
     out.push({ tone: "info", ic: "calendar", title: `Forecast: ${Math.round(forecast)} calls ${tomorrow.toLocaleDateString([], { weekday: "long" })}`,
@@ -407,7 +414,7 @@
   }
 
   views.ai = function () {
-    const ins = insights();
+    const ins = (isLive() && M && S.marketing ? M.insights(H()) : []).concat(insights());
     const runs = S.rules.reduce((s, r) => s + (r.enabled ? r.runsToday : 0), 0);
     const active = S.rules.filter((r) => r.enabled && r.available !== false).length;
     return hero("Recommendations", "The shop, running itself.", "Automations handle the routine. This page shows what they did, what the data says next, and a switch for every rule.", false) +
@@ -440,6 +447,7 @@
 
   // ---------- charts per view ----------
   function drawCharts() {
+    if (isLive() && M && S.marketing) M.draw(H());
     if (ui.view === "calls" && $("#chart-calls")) {
       const a = series("calls"), b = series("booked");
       C.line($("#chart-calls"), { labels: a.labels, series: [
@@ -462,10 +470,10 @@
     if (ui.view === "campaigns" && $("#chart-lsa")) {
       const r = ui.range === "today" ? "7d" : ui.range;
       const a = series("lsaLeads", r), b = series("lsaBooked", r);
-      C.line($("#chart-lsa"), { labels: a.labels, series: [
-        { name: "Leads", values: a.values, color: "var(--series-1)" },
-        { name: "Booked", values: b.values, color: "var(--series-2)", dashed: true },
-      ], height: 200 });
+      const lines = [{ name: "Leads", values: a.values, color: "var(--series-1)" }];
+      // Booked LSA leads only exist when Google reports lead status.
+      if (b.values.some(Boolean)) lines.push({ name: "Booked", values: b.values, color: "var(--series-2)", dashed: true });
+      C.line($("#chart-lsa"), { labels: a.labels, series: lines, height: 200 });
     }
   }
 
@@ -493,6 +501,7 @@
     $("#bell-count").hidden = unseen === 0;
     $("#foot-time").textContent = `${new Date().toLocaleDateString([], { weekday: "long" })} · ${clock(Date.now())} · ${cfg.company.region}`;
     const online = S.techs.filter((t) => t.status !== "break").length;
+    if ((cfg.hiddenPages || []).includes("dispatch")) { $("#foot-status").textContent = "Live data connected"; return; }
     $("#foot-status").textContent = `Dispatch online · ${online} trucks`;
   }
 
